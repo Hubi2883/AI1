@@ -27,7 +27,8 @@ num_process=2                # Number of processes (GPUs)
 batch_size=12                # Per-GPU batch size
 d_model=32
 d_ff=64
-
+seq_len=50            # Sequence length (adjusted to prevent negative dataset lengths)
+label_len=10 
 # ------------------------------------------------------------
 # Define Prediction Lengths and Corresponding Parameters
 # ------------------------------------------------------------
@@ -62,8 +63,8 @@ for i in "${!pred_lens[@]}"; do
       --model $model_name \
       --data sinusoidal \
       --features S \
-      --seq_len 512 \
-      --label_len 48 \
+      --seq_len $seq_len \
+      --label_len $label_len \
       --pred_len $pred_len \
       --e_layers 2 \
       --d_layers 1 \
@@ -78,3 +79,4 @@ for i in "${!pred_lens[@]}"; do
       --model_comment "$comment" \
       --target value
 done
+
