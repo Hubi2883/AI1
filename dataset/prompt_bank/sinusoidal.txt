@@ -1,0 +1,6 @@
+
+This dataset represents a simple sinusoidal wave with added Gaussian noise, simulating a basic periodic phenomenon.
+- Frequency: 1 Hz
+- Amplitude: 1 unit
+- Noise Level: Low (σ=0.1)
+- Periodicity: Perfectly periodic with consistent amplitude and phase.
