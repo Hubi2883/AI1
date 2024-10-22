@@ -103,6 +103,11 @@ ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 deepspeed_plugin = DeepSpeedPlugin(hf_ds_config='./ds_config_zero2.json')
 accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], deepspeed_plugin=deepspeed_plugin)
 
+# Create the output_weights directory if it doesn't already exist
+output_weights_dir = "output_weights"
+if not os.path.exists(output_weights_dir):
+    os.makedirs(output_weights_dir)
+
 for ii in range(args.itr):
     # setting record of experiments
     setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_{}_{}'.format(
@@ -127,11 +132,7 @@ for ii in range(args.itr):
     vali_data, vali_loader = data_provider(args, 'val')
     test_data, test_loader = data_provider(args, 'test')
 
-
     print(f"Train loader: {train_loader}, Vali loader: {vali_loader}, Test loader: {test_loader}")
-
-
-
 
     if args.model == 'Autoformer':
         model = Autoformer.Model(args).float()
@@ -140,8 +141,7 @@ for ii in range(args.itr):
     else:
         model = TimeLLM.Model(args).float()
 
-    path = os.path.join(args.checkpoints,
-                        setting + '-' + args.model_comment)  # unique checkpoint saving path
+    path = os.path.join(args.checkpoints, setting + '-' + args.model_comment)  # unique checkpoint saving path
     args.content = load_content(args)
     if not os.path.exists(path) and accelerator.is_local_main_process:
         os.makedirs(path)
@@ -252,6 +252,12 @@ for ii in range(args.itr):
                 epoch + 1, train_loss, vali_loss, test_loss, test_mae_loss))
 
         early_stopping(vali_loss, model, path)
+        
+        # Save model weights after each epoch or early stopping
+        weights_path = os.path.join(output_weights_dir, f"model_weights_epoch_{epoch}_predlen_{args.pred_len}.pth")
+        torch.save(model.state_dict(), weights_path)
+        print(f"Model weights saved at: {weights_path}")
+        
         if early_stopping.early_stop:
             accelerator.print("Early stopping")
             break
