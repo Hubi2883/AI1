@@ -13,10 +13,12 @@ ROOT_PATH="./dataset"  # Path to dataset root
 DATA_PATH="sinusoidal/sinusoidal.csv"  # Dataset CSV file path
 OUTPUT_WEIGHTS_PATH="/ceph/home/student.aau.dk/xx06av/AI1/output_weights/model_weights_epoch_19_predlen_10.pth"  # Adjust this path to your saved weights
 
+
+
 # Model parameters
-SEQ_LEN=96
-LABEL_LEN=48
-PRED_LEN=96
+SEQ_LEN=50
+LABEL_LEN=10
+PRED_LEN=10
 EVAL_BATCH_SIZE=8
 LLM_MODEL="LLAMA"  # Specify LLM model (LLAMA, GPT2, etc.)
 LLM_DIM=4096  # Dimension of LLM
