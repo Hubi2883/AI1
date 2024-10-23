@@ -6,12 +6,24 @@ from accelerate import Accelerator, DeepSpeedPlugin
 from accelerate import DistributedDataParallelKwargs
 from models import TimeLLM
 from data_provider.data_factory import data_provider
+from collections import OrderedDict  # Import OrderedDict
 import os
 
 # Function to load model weights and run inference on the test set
 def load_model_and_evaluate(weights_path, model, test_loader, args, accelerator):
     # Load the saved model weights
-    model.load_state_dict(torch.load(weights_path))
+    state_dict = torch.load(weights_path)
+    
+    # Remove 'module.' prefix from keys if present
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        if k.startswith('module.'):
+            name = k[7:]  # remove 'module.' prefix
+        else:
+            name = k
+        new_state_dict[name] = v
+
+    model.load_state_dict(new_state_dict, strict = False)
     model.eval()  # Set the model to evaluation mode
 
     predictions = []
@@ -77,7 +89,7 @@ if __name__ == "__main__":
     parser.add_argument('--data', type=str, required=True, default='ETTm1', help='dataset type')
     parser.add_argument('--root_path', type=str, default='./dataset', help='root path of the data file')
     parser.add_argument('--data_path', type=str, default='ETTh1.csv', help='data file')
-    parser.add_argument('--features', type=str, default='M',
+    parser.add_argument('--features', type=str, default='S',
                         help='forecasting task, options:[M, S, MS]; '
                             'M:multivariate predict multivariate, S: univariate predict univariate, '
                             'MS:multivariate predict univariate')
