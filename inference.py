@@ -23,23 +23,26 @@ def load_model_and_evaluate(weights_path, model, test_loader, args, accelerator)
             name = k
         new_state_dict[name] = v
 
-    model.load_state_dict(new_state_dict, strict = False)
+    model.load_state_dict(new_state_dict, strict=False)
+
+    model = model.to(torch.float32)
+ 
     model.eval()  # Set the model to evaluation mode
 
     predictions = []
     actuals = []
 
     # Inference on the test data
-    with torch.no_grad():  # Disable gradient calculations for inference
+    with torch.no_grad():
         for batch_x, batch_y, batch_x_mark, batch_y_mark in tqdm(test_loader):
-            batch_x = batch_x.float().to(accelerator.device)
-            batch_y = batch_y.float().to(accelerator.device)
-            batch_x_mark = batch_x_mark.float().to(accelerator.device)
-            batch_y_mark = batch_y_mark.float().to(accelerator.device)
+            batch_x = batch_x.float()
+            batch_y = batch_y.float()
+            batch_x_mark = batch_x_mark.float()
+            batch_y_mark = batch_y_mark.float()
 
             # Decoder input (zeros for forecasting)
-            dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float().to(accelerator.device)
-            dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(accelerator.device)
+            dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float()
+            dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float()
 
             # Generate model output
             if args.output_attention:
@@ -149,17 +152,17 @@ if __name__ == "__main__":
     parser.add_argument('--target', type=str, default='value', help='Target feature in your dataset (e.g., value for sinusoidal dataset)')
 
     args = parser.parse_args()
-
-    # Setup accelerator and model
-    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-    deepspeed_plugin = DeepSpeedPlugin(hf_ds_config='./ds_config_zero2.json')
-    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], deepspeed_plugin=deepspeed_plugin)
+ # Initialize Accelerator without DeepSpeedPlugin
+    accelerator = Accelerator()
 
     # Initialize TimeLLM model
     model = TimeLLM.Model(args).float()
 
     # Load test data
     test_data, test_loader = data_provider(args, 'test')
+
+    # Prepare model and data loader with accelerator
+    model, test_loader = accelerator.prepare(model, test_loader)
 
     # Load model weights and run inference
     weights_path = "/ceph/home/student.aau.dk/xx06av/AI1/output_weights/model_weights_epoch_19_predlen_10.pth"
