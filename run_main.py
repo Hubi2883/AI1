@@ -27,7 +27,7 @@ torch.manual_seed(fix_seed)
 np.random.seed(fix_seed)
 
 # basic config
-parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast',
+parser.add_argument('--task_name', type=str, required=True, default='anomaly_detection',
                     help='task name, options:[long_term_forecast, short_term_forecast, imputation, classification, anomaly_detection]')
 parser.add_argument('--is_training', type=int, required=True, default=1, help='status')
 parser.add_argument('--model_id', type=str, required=True, default='test', help='model id')
@@ -88,7 +88,7 @@ parser.add_argument('--train_epochs', type=int, default=10, help='train epochs')
 parser.add_argument('--align_epochs', type=int, default=10, help='alignment epochs')
 parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
 parser.add_argument('--eval_batch_size', type=int, default=8, help='batch size of model evaluation')
-parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
+parser.add_argument('--patience', type=int, default=1, help='early stopping patience')
 parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
 parser.add_argument('--des', type=str, default='test', help='exp description')
 parser.add_argument('--loss', type=str, default='MSE', help='loss function')
@@ -272,5 +272,5 @@ for ii in range(args.itr):
 accelerator.wait_for_everyone()
 if accelerator.is_local_main_process:
     path = './checkpoints'  # unique checkpoint saving path
-    del_files(path)  # delete checkpoint files
-    accelerator.print('success delete checkpoints')
+ #  del_files(path)  # delete checkpoint files
+ #   accelerator.print('success delete checkpoints')
