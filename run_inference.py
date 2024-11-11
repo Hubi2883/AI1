@@ -237,7 +237,7 @@ def main():
     # Manually inverse transform actual data
     mean_target = test_data.scaler.mean_[-1]
     scale_target = test_data.scaler.scale_[-1]
-    full_actual[args.seq_len:] = test_data.data_y[args.seq_len:, -1] * scale_target + mean_target
+    full_actual = test_data.data_y[:, -1] * scale_target + mean_target
 
     # Calculate prediction start index
     pred_start_index = args.seq_len + args.label_len
