@@ -1,0 +1,5 @@
+checkpoints/checkpoints1/checkpoint.pth
+checkpoints/weird_prompt/checkpoint.pth
+results_csv/inference_results_try_1.csv
+results_csv/inference_results_try_2.csv
+results_csv/inference_results_try_3.csv

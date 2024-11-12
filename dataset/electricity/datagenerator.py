@@ -24,7 +24,7 @@ def generate_synthetic_dataset(file_path, num_features=3, num_samples=10000):
     # Generate sinusoidal features
     for i in range(1, num_features + 1):
         # Random frequency between 0.01 and 0.05
-        freq = 0.03#np.random.uniform(0.01, 0.05)
+        freq = 0.003#np.random.uniform(0.01, 0.05)
         # Random amplitude between 0.5 and 1.5
         amplitude = 1#np.random.uniform(0.5, 2)
         # Random phase between 0 and 2π

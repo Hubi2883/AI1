@@ -4,13 +4,13 @@
 set -e
 
 # Define variables for paths to make the script easier to modify
-CHECKPOINT_PATH="/ceph/home/student.aau.dk/xx06av/AI1/checkpoints/long_term_forecast_ECL_512_96_TimeLLM_ECL_ftMS_sl512_ll8_pl96_dm16_nh8_el2_dl1_df32_fc3_ebtimeF_test_0-TimeLLM-ECL/checkpoint.pth"
+CHECKPOINT_PATH="/ceph/home/student.aau.dk/xx06av/AI1/checkpoints/weird_prompt/checkpoint.pth"
 OUTPUT_PLOT="forecasting_results1000.png"  # Base name; script will append '_OT.png'
 OUTPUT_CSV="inference_results1000.csv"
 DATA_PATH="/ceph/home/student.aau.dk/xx06av/AI1/dataset/electricity/electricity.csv"
+CSV_NAME="try_4"
 # Set pred_len to match the training configuration (e.g., 96)
 PRED_LEN=96
-
 # Set batch size (recommend setting to 1 or a manageable number)
 BATCH_SIZE=16
 
@@ -50,7 +50,9 @@ python run_inference.py \
   --batch_size "$BATCH_SIZE" \
   --save_plot_path "$OUTPUT_PLOT" \
   --seasonal_patterns Monthly \
-  --device cuda
+  --device cuda \
+  --csv_name "$CSV_NAME" 
+
 
 # Optional: Print completion message
-echo "Inference completed successfully. Results saved to $OUTPUT_PLOT and $OUTPUT_CSV."
+echo "Inference completed successfully. Results saved to $OUTPUT_PLOT and $CSV_NAME."

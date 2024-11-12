@@ -109,7 +109,8 @@ def main():
                         help='Number of workers for data loading')
     parser.add_argument('--percent', type=float, required=True,
                         help='Percentage of data to use (e.g., 100 for full data)')
-
+    parser.add_argument('--csv_name', type=str, required=True,
+                        help='Name of the csv file')
     # TimeLLM specific arguments
     parser.add_argument('--llm_dim', type=int, required=True,
                         help='LLM model dimension')
@@ -177,6 +178,7 @@ def main():
         batch_size=args.batch_size,
         freq=args.freq,
         target=args.target,
+        csv_name=args.csv_name,
         num_workers=args.num_workers,
         percent=args.percent,
         seasonal_patterns=args.seasonal_patterns,
@@ -334,8 +336,8 @@ def main():
     # Define save paths
     os.makedirs('plots', exist_ok=True)
     os.makedirs('results_csv', exist_ok=True)
-    save_path = os.path.join('plots', f'{os.path.splitext(args.save_plot_path)[0]}_{args.target}.png')
-    csv_filename = os.path.join('results_csv', f'inference_results_{args.target}.csv')
+    save_path = os.path.join('plots', f'{os.path.splitext(args.save_plot_path)[0]}_{args.csv_name}.png')
+    csv_filename = os.path.join('results_csv', f'inference_results_{args.csv_name}.csv')
 
     # Plot the full series forecasting results
     plot_full_series(timeline, full_actual, full_predicted, args.target, save_path=save_path)
