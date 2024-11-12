@@ -13,8 +13,8 @@
     "contiguous_gradients": true,
     "sub_group_size": 1000000000
   },
-  "gradient_accumulation_steps": 2,
-  "train_batch_size": 48,
+  "gradient_accumulation_steps": 1,
+  "train_batch_size": 96,
   "train_micro_batch_size_per_gpu": 12,
   "steps_per_print": 10,
   "wall_clock_breakdown": false
