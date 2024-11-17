@@ -1,1 +1,1 @@
-this is a linear relationship
+This is a combination of two sin waves, where one has values when it is above zero, the other when it is below zero.

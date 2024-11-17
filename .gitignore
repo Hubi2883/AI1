@@ -3,3 +3,6 @@ checkpoints/weird_prompt/checkpoint.pth
 results_csv/inference_results_try_1.csv
 results_csv/inference_results_try_2.csv
 results_csv/inference_results_try_3.csv
+checkpoints/biggermodel/checkpoint.pth
+checkpoints/long_term_forecast_ECL_512_96_TimeLLM_ECL_ftMS_sl512_ll8_pl96_dm32_nh8_el4_dl2_df64_fc3_ebtimeF_test_0-TimeLLM-ECL/checkpoint.pth
+models/__pycache__/TimeLLM.cpython-311.pyc

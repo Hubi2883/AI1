@@ -3,16 +3,15 @@ import numpy as np
 from datetime import datetime, timedelta
 import os
 
-def generate_synthetic_dataset(file_path, num_features=3, num_samples=10000):
+def generate_synthetic_dataset(file_path, num_samples=10000):
     """
-    Generates a synthetic dataset with sinusoidal features and a target variable.
+    Generates a synthetic dataset with modified sinusoidal features and a target variable.
 
     Parameters:
     - file_path (str): Path where the CSV will be saved.
-    - num_features (int): Number of feature columns to generate.
     - num_samples (int): Number of data points (rows) to generate.
 
-    The function creates a DataFrame with 'date', 'feature1' to 'featureN', and 'target'.
+    The function creates a DataFrame with 'date', 'feature1', 'feature2', 'feature3', and 'target'.
     """
     # Generate a date range with hourly intervals
     start_date = datetime(2023, 1, 1)
@@ -21,18 +20,19 @@ def generate_synthetic_dataset(file_path, num_features=3, num_samples=10000):
     # Initialize the data dictionary
     data = {'date': dates}
 
-    # Generate sinusoidal features
-    for i in range(1, num_features + 1):
-        # Random frequency between 0.01 and 0.05
-        freq = 0.003#np.random.uniform(0.01, 0.05)
-        # Random amplitude between 0.5 and 1.5
-        amplitude = 1#np.random.uniform(0.5, 2)
-        # Random phase between 0 and 2π
-        phase = 0#np.random.uniform(0, 2 * np.pi)
-        data[f'feature{i}'] = amplitude * np.sin(2 * np.pi * freq * np.arange(num_samples) + phase)
+    # Generate a base sine wave
+    freq = 0.001
+    amplitude = 1
+    phase = 0
+    sine_wave = amplitude * np.sin(2 * np.pi * freq * np.arange(num_samples) + phase)
 
-    # Generate the target as a combination of features
-    data['target'] = data['feature1'] + 0.5 * data['feature2'] - 0.3 * data['feature3']
+    # Create features based on the sine wave
+    data['feature1'] = np.where(sine_wave > 0, 0, sine_wave)
+    data['feature2'] = np.where(sine_wave <= 0, 0, sine_wave)
+    data['feature3'] = np.zeros(num_samples)
+
+    # Calculate the target as the sum of the features
+    data['target'] = data['feature1'] + data['feature2'] + data['feature3']
 
     # Create the DataFrame
     df = pd.DataFrame(data)
@@ -52,6 +52,5 @@ if __name__ == "__main__":
         # Generate the dataset
         generate_synthetic_dataset(
             file_path=output_file,
-            num_features=3,
             num_samples=10000
         )

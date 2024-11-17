@@ -1,10 +1,10 @@
 #!/bin/bash
-
+# This is the end of the update
 # Set model and training parameters
 model_name=TimeLLM
 train_epochs=10
-learning_rate=0.01
-llama_layers=8
+learning_rate=0.1
+llama_layers=16
 master_port=29500
 num_process=8
 batch_size=8
@@ -29,12 +29,14 @@ accelerate launch --multi_gpu --mixed_precision bf16 --num_processes $num_proces
   --seq_len 512 \
   --label_len 8 \
   --pred_len 96 \
-  --e_layers 2 \
-  --d_layers 1 \
+  --e_layers 4 \
+  --d_layers 2 \
   --factor 3 \
-  --enc_in 3 \
+  --enc_in 4 \
   --dec_in 1 \
   --c_out 1 \
+  --d_ff $d_ff \
+  --d_model $d_model \
   --target $target_feature \
   --batch_size $batch_size \
   --learning_rate $learning_rate \
