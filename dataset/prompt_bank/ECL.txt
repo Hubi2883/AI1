@@ -1,1 +1,1 @@
-This is a combination of two sin waves, where one has values when it is above zero, the other when it is below zero.
+ data is composed of two features each containing one half of a sine wave and one feature which is equal to zero.

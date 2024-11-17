@@ -2,9 +2,9 @@
 # This is the end of the update
 # Set model and training parameters
 model_name=TimeLLM
-train_epochs=10
+train_epochs=5
 learning_rate=0.1
-llama_layers=16
+llama_layers=8
 master_port=29500
 num_process=8
 batch_size=8
@@ -29,11 +29,13 @@ accelerate launch --multi_gpu --mixed_precision bf16 --num_processes $num_proces
   --seq_len 512 \
   --label_len 8 \
   --pred_len 96 \
-  --e_layers 4 \
-  --d_layers 2 \
+  --patch_len 128 \
+  --e_layers 2 \
+  --d_layers 1 \
   --factor 3 \
-  --enc_in 4 \
+  --enc_in 3 \
   --dec_in 1 \
+  --stride 4 \
   --c_out 1 \
   --d_ff $d_ff \
   --d_model $d_model \
@@ -44,4 +46,4 @@ accelerate launch --multi_gpu --mixed_precision bf16 --num_processes $num_proces
   --train_epochs $train_epochs \
   --percent 100 \
   --model_comment $comment \
-  --content "Sinusoid" \
+  --content "The data set is composed of two seperate features each containing one half of a sine wave and one feature which is equal to zero. Predict the next steps." \

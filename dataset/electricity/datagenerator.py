@@ -21,7 +21,7 @@ def generate_synthetic_dataset(file_path, num_samples=10000):
     data = {'date': dates}
 
     # Generate a base sine wave
-    freq = 0.001
+    freq = 0.01
     amplitude = 1
     phase = 0
     sine_wave = amplitude * np.sin(2 * np.pi * freq * np.arange(num_samples) + phase)
