@@ -242,10 +242,15 @@ def main():
     full_actual = test_data.data_y[:, -1] * scale_target + mean_target
 
     # Calculate prediction start index
-    pred_start_index = args.seq_len + args.label_len
+    ###pred_start_index = args.seq_len + args.label_len
+    pred_start_index = args.seq_len 
+
+    print(f"[DEBUG] prediction start index is index is {pred_start_index}")
+
 
     # Calculate maximum number of predictions
     max_predictions = total_length - pred_start_index
+    print(f"[DEBUG] max predictions is {max_predictions}")
 
     # Initialize prediction counter
     assigned_predictions = 0

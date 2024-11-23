@@ -21,18 +21,18 @@ def generate_synthetic_dataset(file_path, num_samples=10000):
     data = {'date': dates}
 
     # Generate a base sine wave
-    freq = 0.01
-    amplitude = 1
+    freq = 0.0005
+    amplitude = 7
     phase = 0
     sine_wave = amplitude * np.sin(2 * np.pi * freq * np.arange(num_samples) + phase)
 
     # Create features based on the sine wave
-    data['feature1'] = np.where(sine_wave > 0, 0, sine_wave)
-    data['feature2'] = np.where(sine_wave <= 0, 0, sine_wave)
-    data['feature3'] = np.zeros(num_samples)
+    data['1'] = np.where(sine_wave > 0, 0, sine_wave)
+    data['2'] = np.where(sine_wave <= 0, 0, sine_wave)
+    data['3'] = np.zeros(num_samples)
 
     # Calculate the target as the sum of the features
-    data['target'] = data['feature1'] + data['feature2'] + data['feature3']
+    data['OT'] = data['1'] + data['2'] + data['3']
 
     # Create the DataFrame
     df = pd.DataFrame(data)
@@ -43,7 +43,7 @@ def generate_synthetic_dataset(file_path, num_samples=10000):
 
 if __name__ == "__main__":
     # Define the output file path
-    output_file = "synthetic_electricity.csv"
+    output_file = "/ceph/home/student.aau.dk/fo55xa/AI1/dataset/electricity/synthetic_electricity4.csv"
 
     # Check if the file already exists to prevent overwriting
     if os.path.exists(output_file):

@@ -3,14 +3,14 @@ from math import sqrt
 import torch
 import torch.nn as nn
 
-from transformers import LlamaConfig, LlamaModel, LlamaTokenizer, GPT2Config, GPT2Model, GPT2Tokenizer, BertConfig, \
-    BertModel, BertTokenizer
+from transformers import LlamaConfig, LlamaModel, LlamaTokenizer, GPT2Config, GPT2Model, GPT2Tokenizer, BertConfig, BertModel, BertTokenizer
 from layers.Embed import PatchEmbedding
 import transformers
 from layers.StandardNorm import Normalize
+import os
 
 transformers.logging.set_verbosity_error()
-
+run_mode = os.getenv("RUN_MODE")
 
 class FlattenHead(nn.Module):
     def __init__(self, n_vars, nf, target_window, head_dropout=0):
@@ -41,41 +41,34 @@ class Model(nn.Module):
         self.stride = configs.stride
 
         if configs.llm_model == 'LLAMA':
-            # self.llama_config = LlamaConfig.from_pretrained('/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/')
             self.llama_config = LlamaConfig.from_pretrained('huggyllama/llama-7b')
             self.llama_config.num_hidden_layers = configs.llm_layers
             self.llama_config.output_attentions = True
             self.llama_config.output_hidden_states = True
             try:
                 self.llm_model = LlamaModel.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/",
                     'huggyllama/llama-7b',
                     trust_remote_code=True,
                     local_files_only=True,
                     config=self.llama_config,
-                    # load_in_4bit=True
                 )
-            except EnvironmentError:  # downloads model from HF is not already done
+            except EnvironmentError:
                 print("Local model files not found. Attempting to download...")
                 self.llm_model = LlamaModel.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/",
                     'huggyllama/llama-7b',
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.llama_config,
-                    # load_in_4bit=True
                 )
             try:
                 self.tokenizer = LlamaTokenizer.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/tokenizer.model",
                     'huggyllama/llama-7b',
                     trust_remote_code=True,
                     local_files_only=True
                 )
-            except EnvironmentError:  # downloads the tokenizer from HF if not already done
-                print("Local tokenizer files not found. Atempting to download them..")
+            except EnvironmentError:
+                print("Local tokenizer files not found. Attempting to download...")
                 self.tokenizer = LlamaTokenizer.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/tokenizer.model",
                     'huggyllama/llama-7b',
                     trust_remote_code=True,
                     local_files_only=False
@@ -93,7 +86,7 @@ class Model(nn.Module):
                     local_files_only=True,
                     config=self.gpt2_config,
                 )
-            except EnvironmentError:  # downloads model from HF is not already done
+            except EnvironmentError:
                 print("Local model files not found. Attempting to download...")
                 self.llm_model = GPT2Model.from_pretrained(
                     'openai-community/gpt2',
@@ -108,8 +101,8 @@ class Model(nn.Module):
                     trust_remote_code=True,
                     local_files_only=True
                 )
-            except EnvironmentError:  # downloads the tokenizer from HF if not already done
-                print("Local tokenizer files not found. Atempting to download them..")
+            except EnvironmentError:
+                print("Local tokenizer files not found. Attempting to download...")
                 self.tokenizer = GPT2Tokenizer.from_pretrained(
                     'openai-community/gpt2',
                     trust_remote_code=True,
@@ -128,7 +121,7 @@ class Model(nn.Module):
                     local_files_only=True,
                     config=self.bert_config,
                 )
-            except EnvironmentError:  # downloads model from HF is not already done
+            except EnvironmentError:
                 print("Local model files not found. Attempting to download...")
                 self.llm_model = BertModel.from_pretrained(
                     'google-bert/bert-base-uncased',
@@ -143,8 +136,8 @@ class Model(nn.Module):
                     trust_remote_code=True,
                     local_files_only=True
                 )
-            except EnvironmentError:  # downloads the tokenizer from HF if not already done
-                print("Local tokenizer files not found. Atempting to download them..")
+            except EnvironmentError:
+                print("Local tokenizer files not found. Attempting to download...")
                 self.tokenizer = BertTokenizer.from_pretrained(
                     'google-bert/bert-base-uncased',
                     trust_remote_code=True,
@@ -184,8 +177,10 @@ class Model(nn.Module):
         self.head_nf = self.d_ff * self.patch_nums
 
         if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
-            self.output_projection = FlattenHead(configs.enc_in, self.head_nf, self.pred_len,
-                                                 head_dropout=configs.dropout)
+            self.output_projection = FlattenHead(configs.enc_in, self.head_nf, self.pred_len, head_dropout=configs.dropout)
+        elif self.task_name == 'anomaly_detection':
+            self.output_projection = FlattenHead(configs.enc_in, self.head_nf, self.pred_len, head_dropout=configs.dropout)
+            self.output_projection_anomaly = nn.Linear(self.head_nf, 1)  # Added for anomaly detection
         else:
             raise NotImplementedError
 
@@ -195,6 +190,9 @@ class Model(nn.Module):
         if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
             dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
             return dec_out[:, -self.pred_len:, :]
+        elif self.task_name == 'anomaly_detection':
+            dec_out, anomaly_scores = self.detect_anomalies(x_enc, x_mark_enc)
+            return dec_out[:, -self.pred_len:, :], anomaly_scores
         return None
 
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
@@ -219,14 +217,12 @@ class Model(nn.Module):
             prompt_ = (
                 f"<|start_prompt|>Dataset description: {self.description}"
                 f"Task description: forecast the next {str(self.pred_len)} steps given the previous {str(self.seq_len)} steps information; "
-                #f"Task description: classify the signal as 0 if it is sinusoid or 1 otherwise "
                 f"Input statistics: "
                 f"min value {min_values_str}, "
                 f"max value {max_values_str}, "
                 f"median value {median_values_str}, "
                 f"the trend of input is {'upward' if trends[b] > 0 else 'downward'}, "
                 f"top 5 lags are : {lags_values_str}<|<end_prompt>|>"
-                
             )
 
             prompt.append(prompt_)
@@ -238,7 +234,12 @@ class Model(nn.Module):
         source_embeddings = self.mapping_layer(self.word_embeddings.permute(1, 0)).permute(1, 0)
 
         x_enc = x_enc.permute(0, 2, 1). contiguous()
-        enc_out, n_vars = self.patch_embedding(x_enc)#.to(torch.bfloat16))
+        if run_mode == "TRAINING":
+            enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
+        else:
+            enc_out, n_vars = self.patch_embedding(x_enc)  # .to(torch.bfloat16)
+
+        #enc_out, n_vars = self.patch_embedding(x_enc)#.to(torch.bfloat16))
         enc_out = self.reprogramming_layer(enc_out, source_embeddings, source_embeddings)
         llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1)
         dec_out = self.llm_model(inputs_embeds=llama_enc_out).last_hidden_state
@@ -254,6 +255,35 @@ class Model(nn.Module):
         dec_out = self.normalize_layers(dec_out, 'denorm')
 
         return dec_out
+
+    def detect_anomalies(self, x_enc, x_mark_enc):
+        x_enc = self.normalize_layers(x_enc, 'norm')
+        B, T, N = x_enc.size()
+        x_enc = x_enc.permute(0, 2, 1).contiguous().reshape(B * N, T, 1)
+        prompt = self.prepare_prompt(x_enc)
+        prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(x_enc.device))
+        x_enc = x_enc.reshape(B, N, T).permute(0, 2, 1).contiguous()
+        #enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
+        if run_mode == "TRAINING":
+            enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
+        else:
+            enc_out, n_vars = self.patch_embedding(x_enc)  # .to(torch.bfloat16)
+        enc_out = self.reprogramming_layer(enc_out, self.word_embeddings, self.word_embeddings)
+        llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1)
+        dec_out = self.llm_model(inputs_embeds=llama_enc_out).last_hidden_state
+        dec_out = dec_out[:, :, :self.d_ff]
+        dec_out = torch.reshape(dec_out, (-1, n_vars, dec_out.shape[-2], dec_out.shape[-1]))
+        dec_out = dec_out.permute(0, 1, 3, 2).contiguous()
+        forecast_out = self.output_projection(dec_out[:, :, :, -self.patch_nums:])
+        anomaly_scores = torch.sigmoid(self.output_projection_anomaly(dec_out[:, :, :, -self.patch_nums:]))
+        anomaly_scores = anomaly_scores.permute(0, 2, 1).contiguous()
+        forecast_out = self.normalize_layers(forecast_out, 'denorm')
+        anomaly_scores = self.normalize_layers(anomaly_scores, 'denorm')
+        return forecast_out, anomaly_scores
+
+    def prepare_prompt(self, x_enc):
+        # Implementation of prompt creation as in original forecast
+        pass
 
     def calcute_lags(self, x_enc):
         q_fft = torch.fft.rfft(x_enc.permute(0, 2, 1).contiguous(), dim=-1)
