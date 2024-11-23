@@ -14,7 +14,7 @@ CSV_NAME="try_17"
 # Set pred_len to match the training configuration (e.g., 96)
 PRED_LEN=1000
 # Set batch size (recommend setting to 1 or a manageable number)
-BATCH_SIZE=1
+BATCH_SIZE=3
 num_process=8
 master_port=29500
 BATCH_SIZE=3

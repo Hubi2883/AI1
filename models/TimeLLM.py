@@ -1,14 +1,12 @@
 from math import sqrt
-
 import torch
 import torch.nn as nn
-
-from transformers import LlamaConfig, LlamaModel, LlamaTokenizer, GPT2Config, GPT2Model, GPT2Tokenizer, BertConfig, BertModel, BertTokenizer
+from transformers import LlamaConfig, LlamaModel, LlamaTokenizer, GPT2Config, GPT2Model, GPT2Tokenizer, BertConfig, \
+    BertModel, BertTokenizer
 from layers.Embed import PatchEmbedding
 import transformers
 from layers.StandardNorm import Normalize
 import os
-
 transformers.logging.set_verbosity_error()
 run_mode = os.getenv("RUN_MODE")
 
@@ -234,11 +232,11 @@ class Model(nn.Module):
         source_embeddings = self.mapping_layer(self.word_embeddings.permute(1, 0)).permute(1, 0)
 
         x_enc = x_enc.permute(0, 2, 1). contiguous()
-        if run_mode == "TRAINING":
+
+        if run_mode == "I":
             enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
         else:
             enc_out, n_vars = self.patch_embedding(x_enc)  # .to(torch.bfloat16)
-
         #enc_out, n_vars = self.patch_embedding(x_enc)#.to(torch.bfloat16))
         enc_out = self.reprogramming_layer(enc_out, source_embeddings, source_embeddings)
         llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1)
