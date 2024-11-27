@@ -18,6 +18,25 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+def vali_classification(args, accelerator, model, vali_data, vali_loader, criterion):
+    model.eval()
+    total_loss = []
+    total_acc = []
+    with torch.no_grad():
+        for batch_x, batch_y, batch_x_mark, batch_y_mark in vali_loader:
+            batch_x = batch_x.float().to(accelerator.device)
+            batch_x_mark = batch_x_mark.float().to(accelerator.device)
+            batch_y = batch_y.long().to(accelerator.device)
+            batch_y = batch_y.squeeze(-1)  # Ensure batch_y has shape (batch_size,)
+            outputs = model(batch_x, batch_x_mark, None, None)
+            loss = criterion(outputs, batch_y)
+            total_loss.append(loss.item())
+            _, predicted = torch.max(outputs.data, 1)
+            acc = accuracy(predicted, batch_y)
+            total_acc.append(acc)
+    average_loss = np.average(total_loss)
+    average_acc = np.average(total_acc)
+    return average_loss, average_acc
 
 
 def adjust_learning_rate(accelerator, optimizer, scheduler, epoch, args, printout=True):

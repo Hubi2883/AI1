@@ -23,6 +23,27 @@ class FlattenHead(nn.Module):
         x = self.linear(x)
         x = self.dropout(x)
         return x
+class ClassificationHead(nn.Module):
+    def __init__(self, nf, num_classes, head_dropout=0):
+        super().__init__()
+        self.num_classes = num_classes
+        hidden_layer_size = 4
+        self.fc_one = nn.Linear(nf, hidden_layer_size)
+        self.dropout = nn.Dropout(head_dropout)
+        self.fc_two = nn.Linear(hidden_layer_size, self.num_classes)
+
+    def forward(self, x):
+        # x shape: (B, n_vars, d_ff, T)
+        x = x.permute(0, 3, 1, 2)  # Shape: (B, T, n_vars, d_ff)
+        B, T, n_vars, d_ff = x.shape
+        x = x.reshape(B * T, n_vars * d_ff)  # Flatten n_vars and d_ff
+        x = F.relu(self.fc_one(x))  # Shape: (B * T, hidden_layer_size)
+        x = self.dropout(x)
+        x = self.fc_two(x)  # Shape: (B * T, num_classes)
+        x = torch.sigmoid(x)
+        x = x.view(B, T, self.num_classes)  # Reshape back to (B, T, num_classes)
+        return x
+
 
 
 class Model(nn.Module):
@@ -36,7 +57,9 @@ class Model(nn.Module):
         self.top_k = 5
         self.d_llm = configs.llm_dim
         self.patch_len = configs.patch_len
+        self.num_classes = configs.num_classes 
         self.stride = configs.stride
+        self.n_vars = configs.enc_in 
 
         if configs.llm_model == 'LLAMA':
             self.llama_config = LlamaConfig.from_pretrained('huggyllama/llama-7b')
@@ -179,6 +202,12 @@ class Model(nn.Module):
         elif self.task_name == 'anomaly_detection':
             self.output_projection = FlattenHead(configs.enc_in, self.head_nf, self.pred_len, head_dropout=configs.dropout)
             self.output_projection_anomaly = nn.Linear(self.head_nf, 1)  # Added for anomaly detection
+        elif self.task_name == 'classification':
+            self.classification_head = ClassificationHead(
+                input_dim=self.n_vars * self.d_ff,
+                num_classes=self.num_classes,
+                dropout=configs.dropout
+            )
         else:
             raise NotImplementedError
 
@@ -188,10 +217,16 @@ class Model(nn.Module):
         if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
             dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
             return dec_out[:, -self.pred_len:, :]
+        elif self.task_name == 'classification':
+            logits = self.classify(x_enc, x_mark_enc, x_dec, x_mark_dec)
+            return logits  # Return logits directly
         elif self.task_name == 'anomaly_detection':
-            dec_out, anomaly_scores = self.detect_anomalies(x_enc, x_mark_enc)
-            return dec_out[:, -self.pred_len:, :], anomaly_scores
-        return None
+            # Existing anomaly detection code
+            pass
+        else:
+            raise NotImplementedError
+
+        
 
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
 
@@ -233,7 +268,7 @@ class Model(nn.Module):
 
         x_enc = x_enc.permute(0, 2, 1). contiguous()
 
-        if run_mode == "I":
+        if run_mode == "T":
             enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
         else:
             enc_out, n_vars = self.patch_embedding(x_enc)  # .to(torch.bfloat16)
@@ -244,7 +279,7 @@ class Model(nn.Module):
         dec_out = dec_out[:, :, :self.d_ff]
 
         dec_out = torch.reshape(
-            dec_out, (-1, n_vars, dec_out.shape[-2], dec_out.shape[-1]))
+        dec_out, (-1, n_vars, dec_out.shape[-2], dec_out.shape[-1]))
         dec_out = dec_out.permute(0, 1, 3, 2).contiguous()
 
         dec_out = self.output_projection(dec_out[:, :, :, -self.patch_nums:])
@@ -253,34 +288,70 @@ class Model(nn.Module):
         dec_out = self.normalize_layers(dec_out, 'denorm')
 
         return dec_out
+        
 
-    def detect_anomalies(self, x_enc, x_mark_enc):
+    def classify(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
+        # Normalize the input data
         x_enc = self.normalize_layers(x_enc, 'norm')
-        B, T, N = x_enc.size()
-        x_enc = x_enc.permute(0, 2, 1).contiguous().reshape(B * N, T, 1)
-        prompt = self.prepare_prompt(x_enc)
-        prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(x_enc.device))
+
+        B, T, N = x_enc.size()  # B: batch size, T: sequence length, N: number of variables
+        x_enc_flat = x_enc.permute(0, 2, 1).contiguous().reshape(B * N, T, 1)
+        min_values = torch.min(x_enc_flat, dim=1)[0]
+        max_values = torch.max(x_enc_flat, dim=1)[0]
+        medians = torch.median(x_enc_flat, dim=1).values
+        lags = self.calcute_lags(x_enc_flat)
+        trends = x_enc_flat.diff(dim=1).sum(dim=1)
+
+        prompt = []
+        for b in range(x_enc_flat.shape[0]):
+            min_values_str = str(min_values[b].item())
+            max_values_str = str(max_values[b].item())
+            median_values_str = str(medians[b].item())
+            lags_values_str = str(lags[b].tolist())
+            prompt_ = (
+                f"<|start_prompt|>Dataset description: {self.description} "
+                f"Task description: Classification task; "
+                f"Input statistics: "
+                f"min value {min_values_str}, "
+                f"max value {max_values_str}, "
+                f"median value {median_values_str}, "
+                f"the trend of input is {'upward' if trends[b] > 0 else 'downward'}, "
+                f"top 5 lags are : {lags_values_str}<|<end_prompt>|>"
+            )
+            prompt.append(prompt_)
         x_enc = x_enc.reshape(B, N, T).permute(0, 2, 1).contiguous()
-        #enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
-        if run_mode == "TRAINING":
+        prompt_tokens = self.tokenizer(
+            prompt,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=2048
+        ).input_ids.to(x_enc.device)
+        prompt_embeddings = self.llm_model.get_input_embeddings()(prompt_tokens)  
+        source_embeddings = self.mapping_layer(self.word_embeddings.permute(1, 0)).permute(1, 0)
+
+        x_enc = x_enc.permute(0, 2, 1).contiguous() 
+
+
+        if run_mode == "T":
             enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
         else:
-            enc_out, n_vars = self.patch_embedding(x_enc)  # .to(torch.bfloat16)
-        enc_out = self.reprogramming_layer(enc_out, self.word_embeddings, self.word_embeddings)
+            enc_out, n_vars = self.patch_embedding(x_enc)
+        enc_out = self.reprogramming_layer(enc_out, source_embeddings, source_embeddings) 
         llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1)
+
         dec_out = self.llm_model(inputs_embeds=llama_enc_out).last_hidden_state
-        dec_out = dec_out[:, :, :self.d_ff]
-        dec_out = torch.reshape(dec_out, (-1, n_vars, dec_out.shape[-2], dec_out.shape[-1]))
-        dec_out = dec_out.permute(0, 1, 3, 2).contiguous()
-        forecast_out = self.output_projection(dec_out[:, :, :, -self.patch_nums:])
-        anomaly_scores = torch.sigmoid(self.output_projection_anomaly(dec_out[:, :, :, -self.patch_nums:]))
-        anomaly_scores = anomaly_scores.permute(0, 2, 1).contiguous()
-        forecast_out = self.normalize_layers(forecast_out, 'denorm')
-        anomaly_scores = self.normalize_layers(anomaly_scores, 'denorm')
-        return forecast_out, anomaly_scores
+        dec_out = dec_out[:, :, :self.d_ff]  
+
+        dec_out = dec_out.reshape(B, N, dec_out.shape[1], dec_out.shape[2])
+
+        dec_out_last = dec_out[:, :, -1, :]  # Shape: (B, N, hidden_dim)
+        dec_out_flat = dec_out_last.reshape(B, -1)  # Shape: (B, N * hidden_dim)
+        logits = self.classification_head(dec_out_flat)  # Shape: (B, num_classes)
+
+        return logits
 
     def prepare_prompt(self, x_enc):
-        # Implementation of prompt creation as in original forecast
         pass
 
     def calcute_lags(self, x_enc):

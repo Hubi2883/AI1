@@ -14,3 +14,16 @@ checkpoints/BEST_long_term_forecast_ECL_512_96_TimeLLM_ECL_ftS_sl512_ll32_pl1000
 checkpoints/long_term_forecast_ECL_512_96_TimeLLM_ECL_ftS_sl2048_ll32_pl1000_dm16_nh8_el4_dl2_df32_fc3_ebtimeF_test_0-TimeLLM-ECL/checkpoint.pth
     
 checkpoints/long_term_forecast_ECL_512_96_TimeLLM_ECL_ftMS_sl512_ll32_pl1000_dm16_nh8_el2_dl1_df32_fc3_ebtimeF_test_0-TimeLLM-ECL/checkpoint.pth
+data_provider/__pycache__/__init__.cpython-311.pyc
+data_provider/__pycache__/data_factory.cpython-311.pyc
+data_provider/__pycache__/data_loader.cpython-311.pyc
+data_provider/__pycache__/m4.cpython-311.pyc
+layers/__pycache__/__init__.cpython-311.pyc
+layers/__pycache__/AutoCorrelation.cpython-311.pyc
+layers/__pycache__/Autoformer_EncDec.cpython-311.pyc
+layers/__pycache__/Embed.cpython-311.pyc
+layers/__pycache__/StandardNorm.cpython-311.pyc
+models/__pycache__/__init__.cpython-311.pyc
+models/__pycache__/Autoformer.cpython-311.pyc
+models/__pycache__/DLinear.cpython-311.pyc
+models/__pycache__/TimeLLM.cpython-311.pyc

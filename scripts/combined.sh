@@ -16,7 +16,7 @@ features='MS'
 target_feature='OT'
 content="The output is a sinusoid"
 OMP_NUM_THREADS=64
-
+task_name='classification'
 # Model training
 train_epochs=3
 learning_rate=0.01
@@ -44,7 +44,7 @@ d_layers=1
 
 
 csv_name="try_71"
-RUN_MODE="I"  # I or T for inference or training
+RUN_MODE="T"  # I or T for inference or training
 
 # Export environment variables
 export OMP_NUM_THREADS=$OMP_NUM_THREADS
@@ -65,6 +65,7 @@ if [ "$RUN_MODE" == "T" ]; then
     --seq_len $seq_len \
     --pred_len $pred_len \
     --patch_len $patch_len \
+    --num_classes 2 \
     --e_layers $e_layers \
     --d_layers $d_layers \
     --factor $factor \
@@ -75,6 +76,7 @@ if [ "$RUN_MODE" == "T" ]; then
     --d_ff $d_ff \
     --d_model $d_model \
     --label_len 32 \
+    --task_name $task_name \
     --target $target_feature \
     --batch_size $batch_size \
     --learning_rate $learning_rate \
@@ -117,7 +119,7 @@ elif [ "$RUN_MODE" == "I" ]; then
     --content "$content" \
     --stride $stride \
     --dropout 0 \
-    --task_name long_term_forecast \
+    --task_name $task_name \
     --batch_size $batch_size \
     --save_plot_path "$output_plot" \
     --seasonal_patterns Monthly \
