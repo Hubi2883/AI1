@@ -166,7 +166,7 @@ for ii in range(args.itr):
     #criterion = nn.MSELoss()
 
     if args.num_classes == 2:
-        criterion = nn.BCEWithLogitsLoss()
+        criterion = nn.BCELoss()
     else:
         criterion = nn.CrossEntropyLoss()
 
@@ -223,8 +223,8 @@ for ii in range(args.itr):
                     outputs = model(batch_x, batch_x_mark)
                     print("Outputs Shape:", outputs.shape)
                     print("Batch_Y Shape:", batch_y.shape)
-                    outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
-                    batch_y = batch_y.view(-1)  # (B*T,)
+                    #outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
+                    #batch_y = batch_y.view(-1)  # (B*T,)
 
                 #f_dim = -1 if args.features == 'MS' else 0
                 #outputs = outputs#[:, -args.pred_len:, f_dim:]
