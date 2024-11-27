@@ -21,25 +21,24 @@ export WORLD_SIZE=8
 
 
 # Set the target feature you want to forecast
-target_feature='OT'  # Replace with the actual feature name
+target_feature='target'  # Replace with the actual feature name
 
 accelerate launch --multi_gpu --mixed_precision bf16 --num_processes $num_process --main_process_port $master_port run_main.py \
-  --task_name long_term_forecast \
+  --task_name classification \
   --is_training 1 \
-  --root_path ./dataset/electricity/ \
-  --data_path electricity.csv \
+  --root_path ./dataset/sinusoidal/ \
+  --data_path synthetic_anomaly_classification_dataset.csv \
   --model_id ECL_512_96 \
   --model $model_name \
   --data ECL \
-  --features S \
+  --features MS \
   --seq_len 512 \
   --label_len 32 \
   --pred_len 1000 \
   --e_layers 4 \
   --d_layers 2 \
   --factor 3 \
-  --enc_in 3 \
-  --enc_in 3 \
+  --enc_in 1 \
   --dec_in 1 \
   --stride 4 \
   --c_out 1 \

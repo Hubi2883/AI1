@@ -202,12 +202,12 @@ for ii in range(args.itr):
                 with torch.cuda.amp.autocast():
                     if args.output_attention:
                         outputs = model(batch_x, batch_x_mark)[0]
-                        outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
-                        batch_y = batch_y.view(-1)  # (B*T,)
+                        #outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
+                        #batch_y = batch_y.view(-1)  # (B*T,)
                     else:
                         outputs = model(batch_x, batch_x_mark)
-                        outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
-                        batch_y = batch_y.view(-1)  # (B*T,)
+                        #outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
+                        #batch_y = batch_y.view(-1)  # (B*T,)
 
                     #f_dim = -1 if args.features == 'MS' else 0
                     #outputs = outputs#[:, -args.pred_len:, f_dim:]
@@ -217,8 +217,8 @@ for ii in range(args.itr):
             else:
                 if args.output_attention:
                     outputs = model(batch_x, batch_x_mark)[0]
-                    outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
-                    batch_y = batch_y.view(-1)  # (B*T,)
+                    #outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
+                    #batch_y = batch_y.view(-1)  # (B*T,)
                 else:
                     outputs = model(batch_x, batch_x_mark)
                     print("Outputs Shape:", outputs.shape)
@@ -228,8 +228,6 @@ for ii in range(args.itr):
 
                 #f_dim = -1 if args.features == 'MS' else 0
                 #outputs = outputs#[:, -args.pred_len:, f_dim:]
-                print("Outputs:", outputs)
-                print("Batch_y:", batch_y)
 
                 loss = criterion(outputs, batch_y)
                 train_loss.append(loss.item())

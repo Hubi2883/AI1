@@ -75,7 +75,7 @@ class FlattenHead_binary_classification(nn.Module):
 
         # Global average pooling over L_total dimension
         x = self.global_avg_pool(x)  # Shape: (B, N*D_ff, 1)
-        x = x.squeeze(-1)            # Shape: (B, N*D_ff)
+        x = x.squeeze(-1)            # Shape: (B, N*D_ff) (3, 32)
 
         # Pass through fully connected layers
         x = F.relu(self.fc_one(x))   # Shape: (B, hidden_size)
