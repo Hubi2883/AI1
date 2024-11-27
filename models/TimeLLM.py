@@ -1,29 +1,50 @@
 from math import sqrt
+
 import torch
 import torch.nn as nn
-from transformers import LlamaConfig, LlamaModel, LlamaTokenizer, GPT2Config, GPT2Model, GPT2Tokenizer, BertConfig, \
-    BertModel, BertTokenizer
+import torch.nn.functional as F
+
+from transformers import LlamaConfig, LlamaModel, LlamaTokenizer, GPT2Config, GPT2Model, GPT2Tokenizer, BertConfig, BertModel, BertTokenizer
 from layers.Embed import PatchEmbedding
 import transformers
 from layers.StandardNorm import Normalize
 import os
-transformers.logging.set_verbosity_error()
-run_mode = os.getenv("RUN_MODE")
 
-class FlattenHead(nn.Module):
+transformers.logging.set_verbosity_error()
+
+class FlattenHead_prediction(nn.Module):
     def __init__(self, n_vars, nf, target_window, head_dropout=0):
         super().__init__()
         self.n_vars = n_vars
         self.flatten = nn.Flatten(start_dim=-2)
         self.linear = nn.Linear(nf, target_window)
-        self.dropout = nn.Dropout(head_dropout)
+        self.dropout = nn.Dropout(head_dropout)     
 
     def forward(self, x):
         x = self.flatten(x)
         x = self.linear(x)
         x = self.dropout(x)
         return x
-class ClassificationHead(nn.Module):
+
+#class FlattenHead_binary_classification(nn.Module):
+#    def __init__(self, nf, num_classes, head_dropout=0):
+        #Number of hidden layers: 1
+        #Number of neurons per hidden layer = 4
+#        super().__init__()
+#        hidden_layer_size = 4
+#        self.flatten = nn.Flatten(start_dim=-2)
+#        self.fc_one = nn.Linear(nf, hidden_layer_size)
+#        self.dropout = nn.Dropout(head_dropout)
+#        self.fc_two = nn.Linear(hidden_layer_size, num_classes)
+
+#    def forward(self, x):
+#        x = self.flatten(x)
+#        x = F.relu(self.fc_one(x))
+#        x = self.dropout(x)
+#        x = F.sigmoid(self.fc_two(x))
+#        return x
+
+class FlattenHead_binary_classification(nn.Module):
     def __init__(self, nf, num_classes, head_dropout=0):
         super().__init__()
         self.num_classes = num_classes
@@ -44,8 +65,7 @@ class ClassificationHead(nn.Module):
         x = x.view(B, T, self.num_classes)  # Reshape back to (B, T, num_classes)
         return x
 
-
-
+    
 class Model(nn.Module):
 
     def __init__(self, configs, patch_len=16, stride=8):
@@ -57,39 +77,45 @@ class Model(nn.Module):
         self.top_k = 5
         self.d_llm = configs.llm_dim
         self.patch_len = configs.patch_len
-        self.num_classes = configs.num_classes 
         self.stride = configs.stride
-        self.n_vars = configs.enc_in 
+        self.num_classes = configs.num_classes
 
         if configs.llm_model == 'LLAMA':
+            # self.llama_config = LlamaConfig.from_pretrained('/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/')
             self.llama_config = LlamaConfig.from_pretrained('huggyllama/llama-7b')
             self.llama_config.num_hidden_layers = configs.llm_layers
             self.llama_config.output_attentions = True
             self.llama_config.output_hidden_states = True
             try:
                 self.llm_model = LlamaModel.from_pretrained(
+                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/",
                     'huggyllama/llama-7b',
                     trust_remote_code=True,
                     local_files_only=True,
                     config=self.llama_config,
+                    # load_in_4bit=True
                 )
-            except EnvironmentError:
+            except EnvironmentError:  # downloads model from HF is not already done
                 print("Local model files not found. Attempting to download...")
                 self.llm_model = LlamaModel.from_pretrained(
+                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/",
                     'huggyllama/llama-7b',
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.llama_config,
+                    # load_in_4bit=True
                 )
             try:
                 self.tokenizer = LlamaTokenizer.from_pretrained(
+                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/tokenizer.model",
                     'huggyllama/llama-7b',
                     trust_remote_code=True,
                     local_files_only=True
                 )
-            except EnvironmentError:
-                print("Local tokenizer files not found. Attempting to download...")
+            except EnvironmentError:  # downloads the tokenizer from HF if not already done
+                print("Local tokenizer files not found. Atempting to download them..")
                 self.tokenizer = LlamaTokenizer.from_pretrained(
+                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/tokenizer.model",
                     'huggyllama/llama-7b',
                     trust_remote_code=True,
                     local_files_only=False
@@ -107,7 +133,7 @@ class Model(nn.Module):
                     local_files_only=True,
                     config=self.gpt2_config,
                 )
-            except EnvironmentError:
+            except EnvironmentError:  # downloads model from HF is not already done
                 print("Local model files not found. Attempting to download...")
                 self.llm_model = GPT2Model.from_pretrained(
                     'openai-community/gpt2',
@@ -122,8 +148,8 @@ class Model(nn.Module):
                     trust_remote_code=True,
                     local_files_only=True
                 )
-            except EnvironmentError:
-                print("Local tokenizer files not found. Attempting to download...")
+            except EnvironmentError:  # downloads the tokenizer from HF if not already done
+                print("Local tokenizer files not found. Atempting to download them..")
                 self.tokenizer = GPT2Tokenizer.from_pretrained(
                     'openai-community/gpt2',
                     trust_remote_code=True,
@@ -142,7 +168,7 @@ class Model(nn.Module):
                     local_files_only=True,
                     config=self.bert_config,
                 )
-            except EnvironmentError:
+            except EnvironmentError:  # downloads model from HF is not already done
                 print("Local model files not found. Attempting to download...")
                 self.llm_model = BertModel.from_pretrained(
                     'google-bert/bert-base-uncased',
@@ -157,8 +183,8 @@ class Model(nn.Module):
                     trust_remote_code=True,
                     local_files_only=True
                 )
-            except EnvironmentError:
-                print("Local tokenizer files not found. Attempting to download...")
+            except EnvironmentError:  # downloads the tokenizer from HF if not already done
+                print("Local tokenizer files not found. Atempting to download them..")
                 self.tokenizer = BertTokenizer.from_pretrained(
                     'google-bert/bert-base-uncased',
                     trust_remote_code=True,
@@ -198,38 +224,83 @@ class Model(nn.Module):
         self.head_nf = self.d_ff * self.patch_nums
 
         if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
-            self.output_projection = FlattenHead(configs.enc_in, self.head_nf, self.pred_len, head_dropout=configs.dropout)
-        elif self.task_name == 'anomaly_detection':
-            self.output_projection = FlattenHead(configs.enc_in, self.head_nf, self.pred_len, head_dropout=configs.dropout)
-            self.output_projection_anomaly = nn.Linear(self.head_nf, 1)  # Added for anomaly detection
-        elif self.task_name == 'classification':
-            self.classification_head = ClassificationHead(
-                input_dim=self.n_vars * self.d_ff,
-                num_classes=self.num_classes,
-                dropout=configs.dropout
-            )
+            self.output_projection = FlattenHead_prediction(configs.enc_in, self.head_nf, self.pred_len,
+                                                 head_dropout=configs.dropout)
+        elif self.task_name == 'classification' or 'anomaly_detection':
+            self.output_projection = FlattenHead_binary_classification(self.head_nf, self.num_classes,
+                                                 head_dropout=configs.dropout)
         else:
             raise NotImplementedError
 
         self.normalize_layers = Normalize(configs.enc_in, affine=False)
 
-    def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
+    def forward(self, x_enc, x_mark_enc, mask=None):
         if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
-            dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
+            dec_out = self.forecast(x_enc, x_mark_enc)
             return dec_out[:, -self.pred_len:, :]
-        elif self.task_name == 'classification':
-            logits = self.classify(x_enc, x_mark_enc, x_dec, x_mark_dec)
-            return logits  # Return logits directly
-        elif self.task_name == 'anomaly_detection':
-            # Existing anomaly detection code
-            pass
-        else:
-            raise NotImplementedError
+        elif self.task_name == 'classification' or self.task_name == 'anomaly_detection':
+            dec_out = self.classify(x_enc, x_mark_enc)
+            return dec_out
+        return None
+    
+    def classify(self, x_enc, x_mark_enc):
+        x_enc = self.normalize_layers(x_enc, 'norm')
 
+        B, T, N = x_enc.size()
+        x_enc = x_enc.permute(0, 2, 1).contiguous().reshape(B * N, T, 1) #Shape: ((B*N), T, 1)
+
+        min_values = torch.min(x_enc, dim=1)[0]
+        max_values = torch.max(x_enc, dim=1)[0]
+        medians = torch.median(x_enc, dim=1).values
+        lags = self.calcute_lags(x_enc)
+        trends = x_enc.diff(dim=1).sum(dim=1)
+
+        prompt = []
+        for b in range(x_enc.shape[0]):
+            min_values_str = str(min_values[b].tolist()[0]) #Shape: (B*N, 1)
+            max_values_str = str(max_values[b].tolist()[0]) #Shape: (B*N, 1)
+            median_values_str = str(medians[b].tolist()[0]) #Shape: (B*N, 1)
+            lags_values_str = str(lags[b].tolist()) #Shape: (B*N, 5)
+            prompt_ = (
+                f"<|start_prompt|>Dataset description: {self.description}"
+                f"Task description: classify the input data into one of {str(self.num_classes)} categories;"
+                "Input statistics: "
+                f"min value {min_values_str}, "
+                f"max value {max_values_str}, "
+                f"median value {median_values_str}, "
+                f"the trend of input is {'upward' if trends[b] > 0 else 'downward'}, "
+                f"top 5 lags are : {lags_values_str}<|<end_prompt>|>"
+            )
+
+            prompt.append(prompt_)
+
+        x_enc = x_enc.reshape(B, N, T).permute(0, 2, 1).contiguous() #Shape: (B, T, N)
+
+        prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048).input_ids #Shape: (B*N, L_prompt), L_prompt: length of the tokenized prompt after padding
+        prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(x_enc.device)) #Shape: (B × N, L_prompt, D_emb), D_emb: Embedding dimension of the LLM
+
+        source_embeddings = self.mapping_layer(self.word_embeddings.permute(1, 0)).permute(1, 0) #Shape: (num_tokens, D_emb)
+
+        x_enc = x_enc.permute(0, 2, 1).contiguous() #Shape: (B, N, T)
+        enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16)) # [enc_out Shape: (B*N, L_patches, D_emb)], [n_vars Shape: N], [L_patches = int((T - self.patch_len) / self.stride) + 1]
+        enc_out = self.reprogramming_layer(enc_out, source_embeddings, source_embeddings) #Shape: (B × N, L_patches, D_emb)
+        llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1) #Shape: (B × N, L_total, D_emb), L_total: L_prompt + L_patches
+        dec_out = self.llm_model(inputs_embeds=llama_enc_out).last_hidden_state # Shape: (B*N, L_total, D_llm)
+
+        dec_out = dec_out[:, :, :self.d_ff] # Shape: (B*N, L_total, D_ff)
+
+        dec_out = torch.reshape(
+            dec_out, (-1, n_vars, dec_out.shape[-2], dec_out.shape[-1])) #Shape: (B, N, L_total, D_ff)
+        dec_out = dec_out.permute(0, 1, 3, 2).contiguous() #Shape: (B, N, D_ff, L_total)
         
+        dec_out = self.output_projection(dec_out)
 
-    def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
+        #dec_out = self.output_projection(dec_out[:, :, :, -self.patch_nums:])
+        #dec_out = dec_out.permute(0, 2, 1).contiguous()
 
+        return dec_out
+
+    def forecast(self, x_enc, x_mark_enc):
         x_enc = self.normalize_layers(x_enc, 'norm')
 
         B, T, N = x_enc.size()
@@ -250,7 +321,7 @@ class Model(nn.Module):
             prompt_ = (
                 f"<|start_prompt|>Dataset description: {self.description}"
                 f"Task description: forecast the next {str(self.pred_len)} steps given the previous {str(self.seq_len)} steps information; "
-                f"Input statistics: "
+                "Input statistics: "
                 f"min value {min_values_str}, "
                 f"max value {max_values_str}, "
                 f"median value {median_values_str}, "
@@ -259,100 +330,87 @@ class Model(nn.Module):
             )
 
             prompt.append(prompt_)
-            
+
         x_enc = x_enc.reshape(B, N, T).permute(0, 2, 1).contiguous()
+
         prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048).input_ids
         prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(x_enc.device))  # (batch, prompt_token, dim)
 
         source_embeddings = self.mapping_layer(self.word_embeddings.permute(1, 0)).permute(1, 0)
 
-        x_enc = x_enc.permute(0, 2, 1). contiguous()
-
-        if run_mode == "T":
-            enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
-        else:
-            enc_out, n_vars = self.patch_embedding(x_enc)  # .to(torch.bfloat16)
-        #enc_out, n_vars = self.patch_embedding(x_enc)#.to(torch.bfloat16))
+        x_enc = x_enc.permute(0, 2, 1).contiguous()
+        enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
         enc_out = self.reprogramming_layer(enc_out, source_embeddings, source_embeddings)
         llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1)
         dec_out = self.llm_model(inputs_embeds=llama_enc_out).last_hidden_state
+
         dec_out = dec_out[:, :, :self.d_ff]
 
         dec_out = torch.reshape(
-        dec_out, (-1, n_vars, dec_out.shape[-2], dec_out.shape[-1]))
+            dec_out, (-1, n_vars, dec_out.shape[-2], dec_out.shape[-1]))
         dec_out = dec_out.permute(0, 1, 3, 2).contiguous()
 
         dec_out = self.output_projection(dec_out[:, :, :, -self.patch_nums:])
         dec_out = dec_out.permute(0, 2, 1).contiguous()
 
-        dec_out = self.normalize_layers(dec_out, 'denorm')
+        #dec_out = self.normalize_layers(dec_out, 'denorm')
 
         return dec_out
-        
+    
+    def get_long_term_forecast(self, x_enc, x_mark_enc=None):
+        """
+        Generates long-term forecast for the given input data.
 
-    def classify(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
-        # Normalize the input data
-        x_enc = self.normalize_layers(x_enc, 'norm')
+        Parameters:
+        - x_enc (numpy array or torch.Tensor): Input time series data of shape (B, T, N),
+          where B is batch size, T is the sequence length, and N is the number of variables/features.
+        - x_mark_enc (numpy array or torch.Tensor, optional): Time features corresponding to x_enc,
+          of shape (B, T, D), where D is the number of time features.
 
-        B, T, N = x_enc.size()  # B: batch size, T: sequence length, N: number of variables
-        x_enc_flat = x_enc.permute(0, 2, 1).contiguous().reshape(B * N, T, 1)
-        min_values = torch.min(x_enc_flat, dim=1)[0]
-        max_values = torch.max(x_enc_flat, dim=1)[0]
-        medians = torch.median(x_enc_flat, dim=1).values
-        lags = self.calcute_lags(x_enc_flat)
-        trends = x_enc_flat.diff(dim=1).sum(dim=1)
+        Returns:
+        - forecast (numpy array): The forecasted data of shape (B, pred_len, N).
+        """
+        # Ensure x_enc is a torch tensor
+        if not isinstance(x_enc, torch.Tensor):
+            x_enc = torch.tensor(x_enc, dtype=torch.float32)
 
-        prompt = []
-        for b in range(x_enc_flat.shape[0]):
-            min_values_str = str(min_values[b].item())
-            max_values_str = str(max_values[b].item())
-            median_values_str = str(medians[b].item())
-            lags_values_str = str(lags[b].tolist())
-            prompt_ = (
-                f"<|start_prompt|>Dataset description: {self.description} "
-                f"Task description: Classification task; "
-                f"Input statistics: "
-                f"min value {min_values_str}, "
-                f"max value {max_values_str}, "
-                f"median value {median_values_str}, "
-                f"the trend of input is {'upward' if trends[b] > 0 else 'downward'}, "
-                f"top 5 lags are : {lags_values_str}<|<end_prompt>|>"
-            )
-            prompt.append(prompt_)
-        x_enc = x_enc.reshape(B, N, T).permute(0, 2, 1).contiguous()
-        prompt_tokens = self.tokenizer(
-            prompt,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=2048
-        ).input_ids.to(x_enc.device)
-        prompt_embeddings = self.llm_model.get_input_embeddings()(prompt_tokens)  
-        source_embeddings = self.mapping_layer(self.word_embeddings.permute(1, 0)).permute(1, 0)
+        # Add batch dimension if necessary
+        if x_enc.dim() == 2:
+            x_enc = x_enc.unsqueeze(0)  # Shape: (1, T, N)
 
-        x_enc = x_enc.permute(0, 2, 1).contiguous() 
-
-
-        if run_mode == "T":
-            enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
+        # Process x_mark_enc similarly
+        if x_mark_enc is not None:
+            if not isinstance(x_mark_enc, torch.Tensor):
+                x_mark_enc = torch.tensor(x_mark_enc, dtype=torch.float32)
+            if x_mark_enc.dim() == 2:
+                x_mark_enc = x_mark_enc.unsqueeze(0)  # Shape: (1, T, D)
         else:
-            enc_out, n_vars = self.patch_embedding(x_enc)
-        enc_out = self.reprogramming_layer(enc_out, source_embeddings, source_embeddings) 
-        llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1)
+            x_mark_enc = None  # Adjust based on your model's requirements
 
-        dec_out = self.llm_model(inputs_embeds=llama_enc_out).last_hidden_state
-        dec_out = dec_out[:, :, :self.d_ff]  
+        # Create placeholders for decoder inputs (not used in forecast)
+        x_dec = torch.zeros((x_enc.shape[0], self.pred_len, x_enc.shape[2]), device=x_enc.device)
+        x_mark_dec = torch.zeros_like(x_dec) if x_mark_enc is not None else None
 
-        dec_out = dec_out.reshape(B, N, dec_out.shape[1], dec_out.shape[2])
+        # Move data to the same device as the model
+        device = next(self.parameters()).device
+        x_enc = x_enc.to(device)
+        if x_mark_enc is not None:
+            x_mark_enc = x_mark_enc.to(device)
+            x_mark_dec = x_mark_dec.to(device)
+        else:
+            x_mark_dec = None
+        x_dec = x_dec.to(device)
 
-        dec_out_last = dec_out[:, :, -1, :]  # Shape: (B, N, hidden_dim)
-        dec_out_flat = dec_out_last.reshape(B, -1)  # Shape: (B, N * hidden_dim)
-        logits = self.classification_head(dec_out_flat)  # Shape: (B, num_classes)
+        # Generate forecast
+        self.eval()  # Set model to evaluation mode
+        with torch.no_grad():
+            forecast = self.forward(x_enc, x_mark_enc, x_dec, x_mark_dec)
 
-        return logits
+        # Move forecast to CPU and convert to numpy array
+        forecast = forecast.cpu().detach().numpy()
 
-    def prepare_prompt(self, x_enc):
-        pass
+        return forecast
+
 
     def calcute_lags(self, x_enc):
         q_fft = torch.fft.rfft(x_enc.permute(0, 2, 1).contiguous(), dim=-1)
@@ -362,6 +420,7 @@ class Model(nn.Module):
         mean_value = torch.mean(corr, dim=1)
         _, lags = torch.topk(mean_value, self.top_k, dim=-1)
         return lags
+
 
 
 class ReprogrammingLayer(nn.Module):
