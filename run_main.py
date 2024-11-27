@@ -5,7 +5,7 @@ from accelerate import DistributedDataParallelKwargs
 from torch import nn, optim
 from torch.optim import lr_scheduler
 from tqdm import tqdm
-from models import TimeLLM
+from models import Autoformer, DLinear, TimeLLM
 from data_provider.data_factory import data_provider
 import time
 import random
@@ -15,7 +15,7 @@ import os
 os.environ['CURL_CA_BUNDLE'] = ''
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:64"
 
-from utils.tools import del_files, EarlyStopping, adjust_learning_rate, vali_classification, vali, load_content
+from utils.tools import del_files, EarlyStopping, adjust_learning_rate, vali, load_content
 
 parser = argparse.ArgumentParser(description='Time-LLM')
 
@@ -25,13 +25,13 @@ torch.manual_seed(fix_seed)
 np.random.seed(fix_seed)
 
 # basic config
-parser.add_argument('--task_name', type=str, required=True, default='classification',
+parser.add_argument('--task_name', type=str, required=True, default='anomaly_detection',
                     help='task name, options:[long_term_forecast, short_term_forecast, imputation, classification, anomaly_detection]')
 parser.add_argument('--is_training', type=int, required=True, default=1, help='status')
 parser.add_argument('--model_id', type=str, required=True, default='test', help='model id')
 parser.add_argument('--model_comment', type=str, required=True, default='none', help='prefix when saving test results')
-parser.add_argument('--model', type=str, required=True, default='TimeLLM',
-                    help='model name, options: [Autoformer, DLinear, TimeLLM]')
+parser.add_argument('--model', type=str, required=True, default='Autoformer',
+                    help='model name, options: [Autoformer, DLinear]')
 parser.add_argument('--seed', type=int, default=2021, help='random seed')
 
 # data loader
@@ -55,11 +55,11 @@ parser.add_argument('--seq_len', type=int, default=96, help='input sequence leng
 parser.add_argument('--label_len', type=int, default=48, help='start token length')
 parser.add_argument('--pred_len', type=int, default=96, help='prediction sequence length')
 parser.add_argument('--seasonal_patterns', type=str, default='Monthly', help='subset for M4')
-parser.add_argument('--num_classes', type=int, required=True, default=2)
 
 # model define
 parser.add_argument('--enc_in', type=int, default=7, help='encoder input size')
 parser.add_argument('--dec_in', type=int, default=7, help='decoder input size')
+parser.add_argument('--num_classes', type=int, default=2, help='number of classes for classification')
 parser.add_argument('--c_out', type=int, default=7, help='output size')
 parser.add_argument('--d_model', type=int, default=16, help='dimension of model')
 parser.add_argument('--n_heads', type=int, default=8, help='num of heads')
@@ -76,8 +76,8 @@ parser.add_argument('--output_attention', action='store_true', help='whether to 
 parser.add_argument('--patch_len', type=int, default=16, help='patch length')
 parser.add_argument('--stride', type=int, default=8, help='stride')
 parser.add_argument('--prompt_domain', type=int, default=1, help='')
-parser.add_argument('--llm_model', type=str, default='LLAMA', help='LLM model')  # LLAMA, GPT2, BERT
-parser.add_argument('--llm_dim', type=int, default=4096, help='LLM model dimension')  # LLama7b:4096; GPT2-small:768; BERT-base:768
+parser.add_argument('--llm_model', type=str, default='LLAMA', help='LLM model') # LLAMA, GPT2, BERT
+parser.add_argument('--llm_dim', type=int, default=4096, help='LLM model dimension')# LLama7b:4096; GPT2-small:768; BERT-base:768
 parser.add_argument('--content', type=str, required=True, help='Content for prompt domain')
 
 # optimization
@@ -110,6 +110,7 @@ for ii in range(args.itr):
         args.model,
         args.data,
         args.features,
+        args.num_classes,
         args.seq_len,
         args.label_len,
         args.pred_len,
@@ -117,7 +118,6 @@ for ii in range(args.itr):
         args.n_heads,
         args.e_layers,
         args.d_layers,
-        args.num_classes,
         args.d_ff,
         args.factor,
         args.embed,
@@ -129,7 +129,12 @@ for ii in range(args.itr):
 
     print(f"Train loader: {train_loader}, Vali loader: {vali_loader}, Test loader: {test_loader}")
 
-    model = TimeLLM.Model(args).float()
+    if args.model == 'Autoformer':
+        model = Autoformer.Model(args).float()
+    elif args.model == 'DLinear':
+        model = DLinear.Model(args).float()
+    else:
+        model = TimeLLM.Model(args).float()
 
     path = os.path.join(args.checkpoints,
                         setting + '-' + args.model_comment)  # unique checkpoint saving path
@@ -158,13 +163,12 @@ for ii in range(args.itr):
                                             epochs=args.train_epochs,
                                             max_lr=args.learning_rate)
 
-    # Choose loss function based on task
-    if args.task_name == 'classification':
-        criterion = nn.CrossEntropyLoss()
-        from utils.metrics import accuracy 
+    #criterion = nn.MSELoss()
+
+    if args.num_classes == 2:
+        criterion = nn.BCEWithLogitsLoss()
     else:
-        criterion = nn.MSELoss()
-        mae_metric = nn.L1Loss()
+        criterion = nn.CrossEntropyLoss()
 
     train_loader, vali_loader, test_loader, model, model_optim, scheduler = accelerator.prepare(
         train_loader, vali_loader, test_loader, model, model_optim, scheduler)
@@ -183,59 +187,52 @@ for ii in range(args.itr):
             model_optim.zero_grad()
 
             batch_x = batch_x.float().to(accelerator.device)
+            batch_y = batch_y.float().to(accelerator.device)
             batch_x_mark = batch_x_mark.float().to(accelerator.device)
-            if args.task_name == 'classification':
-                # For classification, batch_y should be integer class labels
-                batch_y = batch_y.long().to(accelerator.device)
-            else:
-                batch_y = batch_y.float().to(accelerator.device)
-                batch_y_mark = batch_y_mark.float().to(accelerator.device)
+            batch_y_mark = batch_y_mark.float().to(accelerator.device)
 
-            if args.task_name == 'classification':
-                batch_y = batch_y.long().to(accelerator.device)
-                batch_y = batch_y.squeeze(-1) 
-                if args.use_amp:
-                    with torch.cuda.amp.autocast():
-                        outputs = model(batch_x, batch_x_mark, None, None)
-                        print(f"outputs.shape: {outputs.shape}, batch_y.shape: {batch_y.shape}")
-                        loss = criterion(outputs, batch_y)
-                        train_loss.append(loss.item())
-                else:
-                    outputs = model(batch_x, batch_x_mark, None, None)
-                    print(f"outputs.shape: {outputs.shape}, batch_y.shape: {batch_y.shape}")
-                    loss = criterion(outputs, batch_y)
-                    train_loss.append(loss.item())
-            else:
-                # For forecasting tasks
-                # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float().to(
-                    accelerator.device)
-                dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(
-                    accelerator.device)
+            # decoder input (Not use for now)
+            #dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float().to(
+            #    accelerator.device)
+            #dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(
+            #    accelerator.device)
 
-                if args.use_amp:
-                    with torch.cuda.amp.autocast():
-                        if args.output_attention:
-                            outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
-                        else:
-                            outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-
-                        f_dim = -1 if args.features == 'MS' else 0
-                        outputs = outputs[:, -args.pred_len:, f_dim:]
-                        batch_y = batch_y[:, -args.pred_len:, f_dim:]
-                        loss = criterion(outputs, batch_y)
-                        train_loss.append(loss.item())
-                else:
+            # encoder - decoder
+            if args.use_amp:
+                with torch.cuda.amp.autocast():
                     if args.output_attention:
-                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                        outputs = model(batch_x, batch_x_mark)[0]
+                        outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
+                        batch_y = batch_y.view(-1)  # (B*T,)
                     else:
-                        outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        outputs = model(batch_x, batch_x_mark)
+                        outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
+                        batch_y = batch_y.view(-1)  # (B*T,)
 
-                    f_dim = -1 if args.features == 'MS' else 0
-                    outputs = outputs[:, -args.pred_len:, f_dim:]
-                    batch_y = batch_y[:, -args.pred_len:, f_dim:]
+                    #f_dim = -1 if args.features == 'MS' else 0
+                    #outputs = outputs#[:, -args.pred_len:, f_dim:]
+                    batch_y = batch_y.to(accelerator.device)#[:, -args.pred_len:, f_dim:].to(accelerator.device)
                     loss = criterion(outputs, batch_y)
                     train_loss.append(loss.item())
+            else:
+                if args.output_attention:
+                    outputs = model(batch_x, batch_x_mark)[0]
+                    outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
+                    batch_y = batch_y.view(-1)  # (B*T,)
+                else:
+                    outputs = model(batch_x, batch_x_mark)
+                    print("Outputs Shape:", outputs.shape)
+                    print("Batch_Y Shape:", batch_y.shape)
+                    outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
+                    batch_y = batch_y.view(-1)  # (B*T,)
+
+                #f_dim = -1 if args.features == 'MS' else 0
+                #outputs = outputs#[:, -args.pred_len:, f_dim:]
+                print("Outputs:", outputs)
+                print("Batch_y:", batch_y)
+
+                loss = criterion(outputs, batch_y)
+                train_loss.append(loss.item())
 
             if (i + 1) % 100 == 0:
                 accelerator.print(
@@ -260,23 +257,13 @@ for ii in range(args.itr):
 
         accelerator.print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
         train_loss = np.average(train_loss)
+        vali_loss, vali_accuracy, vali_precision, vali_recall, vali_f1_score = vali(args, accelerator, model, vali_data, vali_loader, criterion)
+        test_loss, test_accuracy, test_precision, test_recall, test_f1_score = vali(args, accelerator, model, test_data, test_loader, criterion)
+        accelerator.print(
+            "Epoch: {0} | Train Loss: {1:.7f} Vali Loss: {2:.7f} Test Loss: {3:.7f} Test Accuracy: {4:.7f}".format(
+                epoch + 1, train_loss, vali_loss, test_loss, test_accuracy))
 
-        if args.task_name == 'classification':
-            # For classification, use validation function suitable for classification
-            vali_loss, vali_acc = vali_classification(args, accelerator, model, vali_data, vali_loader, criterion)
-            test_loss, test_acc = vali_classification(args, accelerator, model, test_data, test_loader, criterion)
-            accelerator.print(
-                "Epoch: {0} | Train Loss: {1:.7f} Vali Loss: {2:.7f} Vali Acc: {3:.3f}% Test Loss: {4:.7f} Test Acc: {5:.3f}%".format(
-                    epoch + 1, train_loss, vali_loss, vali_acc * 100, test_loss, test_acc * 100))
-            early_stopping(vali_loss, model, path)
-        else:
-            vali_loss, vali_mae_loss = vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric)
-            test_loss, test_mae_loss = vali(args, accelerator, model, test_data, test_loader, criterion, mae_metric)
-            accelerator.print(
-                "Epoch: {0} | Train Loss: {1:.7f} Vali Loss: {2:.7f} Test Loss: {3:.7f} MAE Loss: {4:.7f}".format(
-                    epoch + 1, train_loss, vali_loss, test_loss, test_mae_loss))
-            early_stopping(vali_loss, model, path)
-
+        early_stopping(vali_loss, model, path)
         if early_stopping.early_stop:
             accelerator.print("Early stopping")
             break
@@ -297,5 +284,5 @@ for ii in range(args.itr):
 accelerator.wait_for_everyone()
 if accelerator.is_local_main_process:
     path = './checkpoints'  # unique checkpoint saving path
-    # del_files(path)  # delete checkpoint files
-    # accelerator.print('success delete checkpoints')
+ #  del_files(path)  # delete checkpoint files
+ #   accelerator.print('success delete checkpoints')
