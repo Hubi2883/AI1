@@ -45,24 +45,45 @@ class FlattenHead_prediction(nn.Module):
 #        return x
 
 class FlattenHead_binary_classification(nn.Module):
-    def __init__(self, nf, num_classes, head_dropout=0):
+    def __init__(self, n_vars, d_ff, num_classes, T, head_dropout=0):
         super().__init__()
+        self.n_vars = n_vars        # Number of variables (features), N
+        self.d_ff = d_ff            # Feedforward dimension, D_ff
         self.num_classes = num_classes
-        hidden_layer_size = 4
-        self.fc_one = nn.Linear(nf, hidden_layer_size)
-        self.dropout = nn.Dropout(head_dropout)
-        self.fc_two = nn.Linear(hidden_layer_size, self.num_classes)
+        self.T = T                  # Original sequence length (specified separately)
+        self.head_dropout = head_dropout
+
+        # Hidden layer size (adjust as needed)
+        hidden_size = 128
+
+        # Layers
+        # Since L_total can vary and we don't include its relationship with T,
+        # we'll use global average pooling over L_total dimension.
+        self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
+
+        # Fully connected layers
+        self.fc_one = nn.Linear(n_vars * d_ff, hidden_size)
+        self.dropout = nn.Dropout(self.head_dropout)
+        self.fc_two = nn.Linear(hidden_size, self.T * self.num_classes)
 
     def forward(self, x):
-        # x shape: (B, n_vars, d_ff, T)
-        x = x.permute(0, 3, 1, 2)  # Shape: (B, T, n_vars, d_ff)
-        B, T, n_vars, d_ff = x.shape
-        x = x.reshape(B * T, n_vars * d_ff)  # Flatten n_vars and d_ff
-        x = F.relu(self.fc_one(x))  # Shape: (B * T, hidden_layer_size)
+        # x shape: (B, N, D_ff, L_total)
+        B, N, D_ff, L_total = x.shape
+
+        # Flatten over N and D_ff dimensions
+        x = x.view(B, N * D_ff, L_total)  # Shape: (B, N*D_ff, L_total)
+
+        # Global average pooling over L_total dimension
+        x = self.global_avg_pool(x)  # Shape: (B, N*D_ff, 1)
+        x = x.squeeze(-1)            # Shape: (B, N*D_ff)
+
+        # Pass through fully connected layers
+        x = F.relu(self.fc_one(x))   # Shape: (B, hidden_size)
         x = self.dropout(x)
-        x = self.fc_two(x)  # Shape: (B * T, num_classes)
+        x = self.fc_two(x)           # Shape: (B, T * num_classes)
+        x = x.view(B, self.T, self.num_classes)  # Shape: (B, T, num_classes)
         x = torch.sigmoid(x)
-        x = x.view(B, T, self.num_classes)  # Reshape back to (B, T, num_classes)
+
         return x
 
     
@@ -227,8 +248,8 @@ class Model(nn.Module):
             self.output_projection = FlattenHead_prediction(configs.enc_in, self.head_nf, self.pred_len,
                                                  head_dropout=configs.dropout)
         elif self.task_name == 'classification' or 'anomaly_detection':
-            self.output_projection = FlattenHead_binary_classification(self.head_nf, self.num_classes,
-                                                 head_dropout=configs.dropout)
+            self.output_projection = FlattenHead_binary_classification(configs.enc_in, self.d_ff, self.num_classes, 
+                                                                       self.seq_len, head_dropout=configs.dropout)
         else:
             raise NotImplementedError
 
