@@ -164,11 +164,7 @@ for ii in range(args.itr):
                                             max_lr=args.learning_rate)
 
     #criterion = nn.MSELoss()
-
-    if args.num_classes == 2:
-        criterion = nn.BCELoss()
-    else:
-        criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss()
 
     train_loader, vali_loader, test_loader, model, model_optim, scheduler = accelerator.prepare(
         train_loader, vali_loader, test_loader, model, model_optim, scheduler)
@@ -187,7 +183,7 @@ for ii in range(args.itr):
             model_optim.zero_grad()
 
             batch_x = batch_x.float().to(accelerator.device)
-            batch_y = batch_y.float().to(accelerator.device)
+            batch_y = batch_y.long().to(accelerator.device)
             batch_x_mark = batch_x_mark.float().to(accelerator.device)
             batch_y_mark = batch_y_mark.float().to(accelerator.device)
 
@@ -221,13 +217,17 @@ for ii in range(args.itr):
                     #batch_y = batch_y.view(-1)  # (B*T,)
                 else:
                     outputs = model(batch_x, batch_x_mark)
-                    print("Outputs Shape:", outputs.shape)
-                    print("Batch_Y Shape:", batch_y.shape)
+                    B, T, num_classes = outputs.shape
+                    #print("Outputs Shape:", outputs.shape)
+                    #print("Batch_Y Shape:", batch_y.shape)
                     #outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
                     #batch_y = batch_y.view(-1)  # (B*T,)
 
                 #f_dim = -1 if args.features == 'MS' else 0
                 #outputs = outputs#[:, -args.pred_len:, f_dim:]
+
+                outputs = outputs.reshape(B * T, num_classes) #Shape: (B*T, num_classes)
+                batch_y = batch_y.reshape(B * T)
 
                 loss = criterion(outputs, batch_y)
                 train_loss.append(loss.item())
