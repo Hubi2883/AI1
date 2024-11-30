@@ -18,31 +18,251 @@ class FlattenHead_prediction(nn.Module):
         self.n_vars = n_vars
         self.flatten = nn.Flatten(start_dim=-2)
         self.linear = nn.Linear(nf, target_window)
-        self.dropout = nn.Dropout(head_dropout)     
+        self.dropout = nn.Dropout(head_dropout)
 
     def forward(self, x):
         x = self.flatten(x)
         x = self.linear(x)
         x = self.dropout(x)
         return x
+    
 
-#class FlattenHead_binary_classification(nn.Module):
-#    def __init__(self, nf, num_classes, head_dropout=0):
-        #Number of hidden layers: 1
-        #Number of neurons per hidden layer = 4
-#        super().__init__()
-#        hidden_layer_size = 4
-#        self.flatten = nn.Flatten(start_dim=-2)
-#        self.fc_one = nn.Linear(nf, hidden_layer_size)
-#        self.dropout = nn.Dropout(head_dropout)
-#        self.fc_two = nn.Linear(hidden_layer_size, num_classes)
 
-#    def forward(self, x):
-#        x = self.flatten(x)
-#        x = F.relu(self.fc_one(x))
-#        x = self.dropout(x)
-#        x = F.sigmoid(self.fc_two(x))
-#        return x
+class ExtendedFullyConnectedFlattenHead(nn.Module):
+    def __init__(self, n_vars, d_ff, num_classes, T, head_dropout=0.1):
+        super().__init__()
+        self.n_vars = n_vars
+        self.d_ff = d_ff
+        self.num_classes = num_classes
+        self.T = T
+        self.head_dropout = head_dropout
+
+        # Convolutional Layers for feature extraction
+        self.conv1 = nn.Conv1d(in_channels=n_vars * d_ff, out_channels=128, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv1d(in_channels=256, out_channels=128, kernel_size=3, padding=1)
+
+        # Batch normalization
+        self.bn1 = nn.BatchNorm1d(128)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.bn3 = nn.BatchNorm1d(128)
+
+        # Dropout for convolutional layers
+        self.dropout1 = nn.Dropout(head_dropout)
+        self.dropout2 = nn.Dropout(head_dropout)
+        self.dropout3 = nn.Dropout(head_dropout)
+
+        # Global pooling layers
+        self.global_max_pool = nn.AdaptiveMaxPool1d(1)
+        self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
+
+        # Fully connected layers (extended)
+        self.fc1 = nn.Linear(128 * 2, 512)  # Combine max and avg pooled features
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, 256)
+        self.fc4 = nn.Linear(256, 128)
+        self.fc5 = nn.Linear(128, 128)
+        self.fc6 = nn.Linear(128, 64)
+        self.fc7 = nn.Linear(64, T * num_classes)
+
+        # Dropout for fully connected layers
+        self.fc_dropout1 = nn.Dropout(head_dropout)
+        self.fc_dropout2 = nn.Dropout(head_dropout)
+        self.fc_dropout3 = nn.Dropout(head_dropout)
+        self.fc_dropout4 = nn.Dropout(head_dropout)
+
+    def forward(self, x):
+        # Input shape: (B, N, D_ff, L_total)
+        B, N, D_ff, L_total = x.shape
+
+        # Flatten over N and D_ff dimensions
+        x = x.view(B, N * D_ff, L_total)  # Shape: (B, N*D_ff, L_total)
+
+        # Convolutional layers with ReLU and normalization
+        x = F.relu(self.bn1(self.conv1(x)))  # Shape: (B, 128, L_total)
+        x = self.dropout1(x)
+        x = F.relu(self.bn2(self.conv2(x)))  # Shape: (B, 256, L_total)
+        x = self.dropout2(x)
+        x = F.relu(self.bn3(self.conv3(x)))  # Shape: (B, 128, L_total)
+        x = self.dropout3(x)
+
+        # Global pooling
+        max_pooled = self.global_max_pool(x).squeeze(-1)  # Shape: (B, 128)
+        avg_pooled = self.global_avg_pool(x).squeeze(-1)  # Shape: (B, 128)
+
+        # Concatenate pooled features
+        x = torch.cat([max_pooled, avg_pooled], dim=1)  # Shape: (B, 128*2)
+
+        # Fully connected layers
+        x = F.relu(self.fc1(x))  # Shape: (B, 512)
+        x = self.fc_dropout1(x)
+        x = F.relu(self.fc2(x))  # Shape: (B, 256)
+        x = F.relu(self.fc3(x))  # Shape: (B, 256)
+        x = self.fc_dropout2(x)
+        x = F.relu(self.fc4(x))  # Shape: (B, 128)
+        x = self.fc_dropout3(x)
+        x = F.relu(self.fc5(x))  # Shape: (B, 128)
+        x = F.relu(self.fc6(x))  # Shape: (B, 64)
+        x = self.fc_dropout4(x)
+        x = self.fc7(x)          # Shape: (B, T * num_classes)
+
+        # Reshape to (B, T, num_classes)
+        x = x.view(B, self.T, self.num_classes)
+
+        return x
+
+class ComplexFlattenHeadBinaryClassification(nn.Module):
+    def __init__(self, n_vars, d_ff, num_classes, T, head_dropout=0.1):
+        super().__init__()
+        self.n_vars = n_vars
+        self.d_ff = d_ff
+        self.num_classes = num_classes
+        self.T = T
+        self.head_dropout = head_dropout
+
+        # Define convolutional layers for feature extraction
+        self.conv1 = nn.Conv1d(in_channels=n_vars * d_ff, out_channels=128, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv1d(in_channels=256, out_channels=128, kernel_size=3, padding=1)
+
+        # Batch normalization
+        self.bn1 = nn.BatchNorm1d(128)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.bn3 = nn.BatchNorm1d(128)
+
+        # Dropout layers for regularization
+        self.dropout1 = nn.Dropout(head_dropout)
+        self.dropout2 = nn.Dropout(head_dropout)
+        self.dropout3 = nn.Dropout(head_dropout)
+
+        # Global pooling layers
+        self.global_max_pool = nn.AdaptiveMaxPool1d(1)
+        self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
+
+        # Fully connected layers
+        self.fc1 = nn.Linear(128 * 2, 256)  # Combine max and avg pooled features
+        self.fc2 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(128, T * num_classes)
+
+    def forward(self, x):
+        # Input shape: (B, N, D_ff, L_total)
+        B, N, D_ff, L_total = x.shape
+
+        # Flatten over N and D_ff dimensions
+        x = x.view(B, N * D_ff, L_total)  # Shape: (B, N*D_ff, L_total)
+
+        # Convolutional layers with ReLU and normalization
+        x = F.relu(self.bn1(self.conv1(x)))  # Shape: (B, 128, L_total)
+        x = self.dropout1(x)
+        x = F.relu(self.bn2(self.conv2(x)))  # Shape: (B, 256, L_total)
+        x = self.dropout2(x)
+        x = F.relu(self.bn3(self.conv3(x)))  # Shape: (B, 128, L_total)
+        x = self.dropout3(x)
+
+        # Global pooling
+        max_pooled = self.global_max_pool(x).squeeze(-1)  # Shape: (B, 128)
+        avg_pooled = self.global_avg_pool(x).squeeze(-1)  # Shape: (B, 128)
+
+        # Concatenate pooled features
+        x = torch.cat([max_pooled, avg_pooled], dim=1)  # Shape: (B, 128*2)
+
+        # Fully connected layers
+        x = F.relu(self.fc1(x))  # Shape: (B, 256)
+        x = F.relu(self.fc2(x))  # Shape: (B, 128)
+        x = self.fc3(x)          # Shape: (B, T * num_classes)
+
+        # Reshape to (B, T, num_classes)
+        x = x.view(B, self.T, self.num_classes)
+
+        return x
+
+class UltraComplexFlattenHeadBinaryClassification(nn.Module):
+    def __init__(self, n_vars, d_ff, num_classes, T, head_dropout=0.1):
+        super().__init__()
+        self.n_vars = n_vars
+        self.d_ff = d_ff
+        self.num_classes = num_classes
+        self.T = T
+        self.head_dropout = head_dropout
+
+        # Convolutional Block
+        self.conv1 = nn.Conv1d(in_channels=n_vars * d_ff, out_channels=128, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv1d(in_channels=256, out_channels=128, kernel_size=3, padding=1)
+
+        # Depthwise-Separable Convolution Block
+        self.depthwise_conv = nn.Conv1d(128, 128, kernel_size=3, groups=128, padding=1)
+        self.pointwise_conv = nn.Conv1d(128, 128, kernel_size=1)
+
+        # Attention Mechanism
+        self.attention = nn.MultiheadAttention(embed_dim=128, num_heads=4, batch_first=True)
+
+        # Pooling Layers
+        self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.global_max_pool = nn.AdaptiveMaxPool1d(1)
+
+        # Residual Pathway (Dense Connection)
+        self.residual_fc1 = nn.Linear(n_vars * d_ff, 128)
+        self.residual_fc2 = nn.Linear(128, 128)
+
+        # Fully Connected Layers
+        self.fc1 = nn.Linear(128 * 3, 512)  # Combine max, avg pooled, and attention output
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, 128)
+        self.fc4 = nn.Linear(128, T * num_classes)
+
+        # Batch Normalization and Dropout
+        self.bn1 = nn.BatchNorm1d(128)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.bn3 = nn.BatchNorm1d(128)
+        self.dropout = nn.Dropout(head_dropout)
+
+    def forward(self, x):
+        # Input shape: (B, N, D_ff, L_total)
+        B, N, D_ff, L_total = x.shape
+
+        # Flatten over N and D_ff dimensions
+        x = x.view(B, N * D_ff, L_total)  # Shape: (B, N*D_ff, L_total)
+
+        # Convolutional Block
+        x = F.relu(self.bn1(self.conv1(x)))  # Shape: (B, 128, L_total)
+        x = F.relu(self.bn2(self.conv2(x)))  # Shape: (B, 256, L_total)
+        x = F.relu(self.bn3(self.conv3(x)))  # Shape: (B, 128, L_total)
+
+        # Depthwise-Separable Convolution
+        x = F.relu(self.depthwise_conv(x))  # Shape: (B, 128, L_total)
+        x = F.relu(self.pointwise_conv(x))  # Shape: (B, 128, L_total)
+
+        # Residual Pathway
+        residual = x.mean(dim=-1)  # Shape: (B, 128)
+        residual = F.relu(self.residual_fc1(residual))
+        residual = F.relu(self.residual_fc2(residual))
+
+        # Attention Mechanism
+        attention_input = x.permute(0, 2, 1)  # Shape: (B, L_total, 128)
+        attention_out, _ = self.attention(attention_input, attention_input, attention_input)
+        attention_out = attention_out.mean(dim=1)  # Shape: (B, 128)
+
+        # Pooling
+        max_pooled = self.global_max_pool(x).squeeze(-1)  # Shape: (B, 128)
+        avg_pooled = self.global_avg_pool(x).squeeze(-1)  # Shape: (B, 128)
+
+        # Concatenate Features
+        x = torch.cat([max_pooled, avg_pooled, attention_out + residual], dim=1)  # Shape: (B, 128*3)
+
+        # Fully Connected Layers
+        x = F.relu(self.fc1(x))  # Shape: (B, 512)
+        x = self.dropout(x)
+        x = F.relu(self.fc2(x))  # Shape: (B, 256)
+        x = self.dropout(x)
+        x = F.relu(self.fc3(x))  # Shape: (B, 128)
+        x = self.dropout(x)
+        x = self.fc4(x)          # Shape: (B, T * num_classes)
+
+        # Reshape to (B, T, num_classes)
+        x = x.view(B, self.T, self.num_classes)
+
+        return x
 
 class FlattenHead_binary_classification(nn.Module):
     def __init__(self, n_vars, d_ff, num_classes, T, head_dropout=0):
@@ -54,7 +274,7 @@ class FlattenHead_binary_classification(nn.Module):
         self.head_dropout = head_dropout
 
         # Hidden layer size (adjust as needed)
-        hidden_size = 128
+        hidden_size = 32
 
         # Layers
         # Since L_total can vary and we don't include its relationship with T,
@@ -82,7 +302,34 @@ class FlattenHead_binary_classification(nn.Module):
         x = self.dropout(x)
         x = self.fc_two(x)           # Shape: (B, T * num_classes)
         x = x.view(B, self.T, self.num_classes)  # Shape: (B, T, num_classes)
-        x = torch.sigmoid(x)
+        #x = torch.sigmoid(x)
+
+        return x
+
+class CombinedPoolingHeadBinaryClassification(nn.Module):
+    def __init__(self, n_vars, d_ff, num_classes, T, head_dropout=0):
+        super().__init__()
+        self.n_vars = n_vars
+        self.d_ff = d_ff
+        self.num_classes = num_classes
+        self.T = T
+
+        self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.global_max_pool = nn.AdaptiveMaxPool1d(1)
+        self.dropout = nn.Dropout(head_dropout)
+        self.fc = nn.Linear(n_vars * d_ff * 2, T * num_classes)
+
+    def forward(self, x):
+        B, N, D_ff, L_total = x.shape
+        x = x.view(B, N * D_ff, L_total)  # Shape: (B, N*D_ff, L_total)
+
+        avg_pooled = self.global_avg_pool(x).squeeze(-1)  # Shape: (B, N*D_ff)
+        max_pooled = self.global_max_pool(x).squeeze(-1)  # Shape: (B, N*D_ff)
+
+        x = torch.cat([avg_pooled, max_pooled], dim=1)    # Shape: (B, N*D_ff*2)
+        x = self.dropout(x)
+        x = self.fc(x)                                    # Shape: (B, T * num_classes)
+        x = x.view(B, self.T, self.num_classes)
 
         return x
 
@@ -248,8 +495,10 @@ class Model(nn.Module):
             self.output_projection = FlattenHead_prediction(configs.enc_in, self.head_nf, self.pred_len,
                                                  head_dropout=configs.dropout)
         elif self.task_name == 'classification' or 'anomaly_detection':
-            self.output_projection = FlattenHead_binary_classification(configs.enc_in, self.d_ff, self.num_classes, 
-                                                                       self.seq_len, head_dropout=configs.dropout)
+            #self.output_projection = FlattenHead_binary_classification(configs.enc_in, self.d_ff, self.num_classes, 
+            #                                                           self.seq_len, head_dropout=configs.dropout)
+            self.output_projection = ExtendedFullyConnectedFlattenHead(configs.enc_in, self.d_ff, self.num_classes,
+                                                                                 self.seq_len, head_dropout=configs.dropout)
         else:
             raise NotImplementedError
 
@@ -284,7 +533,7 @@ class Model(nn.Module):
             lags_values_str = str(lags[b].tolist()) #Shape: (B*N, 5)
             prompt_ = (
                 f"<|start_prompt|>Dataset description: {self.description}"
-                f"Task description: classify the input data into one of {str(self.num_classes)} categories;"
+                f"Task description: classify the {T} length of input data into one of {str(self.num_classes)} categories: 0 for no anomaly and 1 for anomaly;"
                 "Input statistics: "
                 f"min value {min_values_str}, "
                 f"max value {max_values_str}, "
@@ -369,7 +618,7 @@ class Model(nn.Module):
 
         dec_out = torch.reshape(
             dec_out, (-1, n_vars, dec_out.shape[-2], dec_out.shape[-1]))
-        dec_out = dec_out.permute(0, 1, 3, 2).contiguous()
+        dec_out = dec_out.permute(0, 1, 3, 2).contiguous() #Shape: (B, N, D_ff, L_total)
 
         dec_out = self.output_projection(dec_out[:, :, :, -self.patch_nums:])
         dec_out = dec_out.permute(0, 2, 1).contiguous()
@@ -377,61 +626,6 @@ class Model(nn.Module):
         #dec_out = self.normalize_layers(dec_out, 'denorm')
 
         return dec_out
-    
-    def get_long_term_forecast(self, x_enc, x_mark_enc=None):
-        """
-        Generates long-term forecast for the given input data.
-
-        Parameters:
-        - x_enc (numpy array or torch.Tensor): Input time series data of shape (B, T, N),
-          where B is batch size, T is the sequence length, and N is the number of variables/features.
-        - x_mark_enc (numpy array or torch.Tensor, optional): Time features corresponding to x_enc,
-          of shape (B, T, D), where D is the number of time features.
-
-        Returns:
-        - forecast (numpy array): The forecasted data of shape (B, pred_len, N).
-        """
-        # Ensure x_enc is a torch tensor
-        if not isinstance(x_enc, torch.Tensor):
-            x_enc = torch.tensor(x_enc, dtype=torch.float32)
-
-        # Add batch dimension if necessary
-        if x_enc.dim() == 2:
-            x_enc = x_enc.unsqueeze(0)  # Shape: (1, T, N)
-
-        # Process x_mark_enc similarly
-        if x_mark_enc is not None:
-            if not isinstance(x_mark_enc, torch.Tensor):
-                x_mark_enc = torch.tensor(x_mark_enc, dtype=torch.float32)
-            if x_mark_enc.dim() == 2:
-                x_mark_enc = x_mark_enc.unsqueeze(0)  # Shape: (1, T, D)
-        else:
-            x_mark_enc = None  # Adjust based on your model's requirements
-
-        # Create placeholders for decoder inputs (not used in forecast)
-        x_dec = torch.zeros((x_enc.shape[0], self.pred_len, x_enc.shape[2]), device=x_enc.device)
-        x_mark_dec = torch.zeros_like(x_dec) if x_mark_enc is not None else None
-
-        # Move data to the same device as the model
-        device = next(self.parameters()).device
-        x_enc = x_enc.to(device)
-        if x_mark_enc is not None:
-            x_mark_enc = x_mark_enc.to(device)
-            x_mark_dec = x_mark_dec.to(device)
-        else:
-            x_mark_dec = None
-        x_dec = x_dec.to(device)
-
-        # Generate forecast
-        self.eval()  # Set model to evaluation mode
-        with torch.no_grad():
-            forecast = self.forward(x_enc, x_mark_enc, x_dec, x_mark_dec)
-
-        # Move forecast to CPU and convert to numpy array
-        forecast = forecast.cpu().detach().numpy()
-
-        return forecast
-
 
     def calcute_lags(self, x_enc):
         q_fft = torch.fft.rfft(x_enc.permute(0, 2, 1).contiguous(), dim=-1)
