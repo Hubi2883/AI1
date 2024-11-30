@@ -1,66 +1,69 @@
 #!/usr/bin/env python
 # run_inference.py
 
+import argparse
 import torch
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from models import Autoformer, DLinear, TimeLLM  # Ensure these modules are accessible
 from data_provider.data_factory import data_provider  # Ensure this module is accessible
-import argparse
 import numpy as np
-import matplotlib.pyplot as plt
 import os
 import sys
 from tqdm import tqdm
 import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
+import matplotlib as mpl
+mpl.rcParams['agg.path.chunksize'] = 10000  # Adjust the value as needed
 
-def plot_full_series(timeline, actual_series, predicted_series, feature_name, save_path=None):
+def plot_classification_results(timeline, true_labels, predicted_labels, save_path=None):
     """
-    Plots the actual data and predictions over the entire dataset.
+    Plots the true class labels and predicted class labels over time, limited to the first 1,000 data points.
 
     Args:
         timeline (np.ndarray): Time indices for the x-axis.
-        actual_series (np.ndarray): Actual data points.
-        predicted_series (np.ndarray): Predicted data points.
-        feature_name (str): Name of the feature being plotted.
+        true_labels (np.ndarray): True class labels.
+        predicted_labels (np.ndarray): Predicted class labels.
         save_path (str, optional): Path to save the plot. If None, displays the plot.
     """
-    plt.figure(figsize=(20, 8))
-    
-    # Plot Actual Data
-    plt.plot(timeline, actual_series, label='Actual OT', color='blue', linewidth=2)
-    
-    # Plot Predicted Data
-    plt.plot(timeline, predicted_series, label='Predicted OT', color='red', linewidth=2, alpha=0.7)
-    
-    # Highlight Prediction Horizon
-    pred_start = len(actual_series) - len(predicted_series)
-    plt.axvline(x=pred_start, color='gray', linestyle='--', linewidth=1)
-    plt.text(pred_start, plt.ylim()[1], 'Prediction Start', rotation=90, verticalalignment='top', color='gray')
-    
+    import matplotlib as mpl
+    mpl.rcParams['agg.path.chunksize'] = 10000  # Adjust chunksize to handle large data
+
+    # Limit to the first 1,000 data points
+    max_points = 1000
+    timeline = timeline[:max_points]
+    true_labels = true_labels[:max_points]
+    predicted_labels = predicted_labels[:max_points]
+
+    plt.figure(figsize=(15, 6))
+
+    # Plot True Labels
+    plt.plot(timeline, true_labels, label='True Class', color='blue', linewidth=2)
+
+    # Plot Predicted Labels
+    plt.plot(timeline, predicted_labels, label='Predicted Class', color='red', linewidth=2, alpha=0.7)
+
     # Titles and Labels
-    plt.title(f'Full Series Forecasting Results for Feature: {feature_name}', fontsize=16)
+    plt.title('Classification Results Over First 1,000 Data Points', fontsize=16)
     plt.xlabel('Time', fontsize=14)
-    plt.ylabel('Value', fontsize=14)
+    plt.ylabel('Class Label', fontsize=14)
     plt.legend(fontsize=12)
-    
+
     # Grid for better readability
     plt.grid(True, linestyle='--', alpha=0.5)
-    
+
     # Save or Show Plot
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"Forecast plot saved to {save_path}")
+        print(f"Classification plot saved to {save_path}")
     else:
         plt.show()
 
-
 def main():
-    parser = argparse.ArgumentParser(description='Time-LLM Inference for Full Series Forecasting')
-
-    # [All your existing arguments]
+    parser = argparse.ArgumentParser(description='Time-LLM Inference for Classification Task')
 
     # Required arguments
     parser.add_argument('--model', type=str, required=True, choices=['Autoformer', 'DLinear', 'TimeLLM'],
@@ -85,8 +88,8 @@ def main():
                         help='Encoder input size (number of input features)')
     parser.add_argument('--dec_in', type=int, required=True,
                         help='Decoder input size (number of decoder input features)')
-    parser.add_argument('--c_out', type=int, required=True,
-                        help='Output size (set to 1 for target feature)')
+    parser.add_argument('--num_classes', type=int, default=2,
+                        help='Number of classes for classification')
     parser.add_argument('--d_model', type=int, required=True,
                         help='Dimension of the model')
     parser.add_argument('--n_heads', type=int, required=True,
@@ -104,13 +107,14 @@ def main():
     parser.add_argument('--freq', type=str, required=True,
                         help='Frequency for time features encoding, options: [s, t, h, d, b, w, m]')
     parser.add_argument('--target', type=str, required=True,
-                        help='Target feature to forecast')
+                        help='Target feature for classification')
     parser.add_argument('--num_workers', type=int, required=True,
                         help='Number of workers for data loading')
     parser.add_argument('--percent', type=float, required=True,
                         help='Percentage of data to use (e.g., 100 for full data)')
     parser.add_argument('--csv_name', type=str, required=True,
                         help='Name of the csv file')
+
     # TimeLLM specific arguments
     parser.add_argument('--llm_dim', type=int, required=True,
                         help='LLM model dimension')
@@ -130,18 +134,21 @@ def main():
     # Additional arguments
     parser.add_argument('--dropout', type=float, required=True,
                         help='Dropout rate')
-    parser.add_argument('--task_name', type=str, required=True, choices=['long_term_forecast', 'short_term_forecast', 'imputation'],
-                        help='Task name, options: [long_term_forecast, short_term_forecast, imputation]')
+    parser.add_argument('--task_name', type=str, required=True, choices=['classification', 'anomaly_detection'],
+                        help='Task name, options: [classification, anomaly_detection]')
     parser.add_argument('--batch_size', type=int, required=True,
                         help='Batch size for inference')
     parser.add_argument('--output_attention', action='store_true',
                         help='Whether to output attention weights')
     parser.add_argument('--device', type=str, required=True, choices=['cuda', 'cpu'],
                         help='Device to run inference on: cuda or cpu')
+    parser.add_argument('--save_results_path', type=str, required=True,
+                        help='Path to save the inference results (e.g., inference_results.csv)')
     parser.add_argument('--save_plot_path', type=str, required=True,
-                        help='Path to save the inference plot (e.g., forecasting_results.png)')
+                        help='Path to save the classification plot (e.g., classification_plot.png)')
     parser.add_argument('--seasonal_patterns', type=str, required=True,
                         help='Seasonal patterns for the dataset (e.g., Monthly)')
+    parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
 
     args = parser.parse_args()
 
@@ -155,7 +162,7 @@ def main():
     test_args = argparse.Namespace(
         task_name=args.task_name,
         is_training=0,
-        model_id='ECL_512_96',  # Modify if needed
+        model_id='inference_model',  # Modify if needed
         model=args.model,
         data=args.data,
         root_path=os.path.dirname(args.data_path) + '/',
@@ -166,7 +173,8 @@ def main():
         pred_len=args.pred_len,
         enc_in=args.enc_in,
         dec_in=args.dec_in,
-        c_out=args.c_out,
+        num_classes=args.num_classes,
+        c_out=args.num_classes,  # For classification, output size equals number of classes
         d_model=args.d_model,
         n_heads=args.n_heads,
         e_layers=args.e_layers,
@@ -194,7 +202,7 @@ def main():
         device=device,
     )
 
-    # Load full data
+    # Load test data
     test_args.flag = 'test'  # Use the test flag
     test_data, test_loader = data_provider(test_args, flag='test')
 
@@ -230,146 +238,81 @@ def main():
     # Prepare the test_loader with accelerator
     test_loader = accelerator.prepare(test_loader)
 
-    # Initialize arrays for full series
-    total_length = len(test_data.data_y)
-    timeline = np.arange(total_length)
-    full_actual = np.zeros(total_length)
-    full_predicted = np.full(total_length, np.nan)  # Initialize with NaN
-
-    # Manually inverse transform actual data
-    mean_target = test_data.scaler.mean_[-1]
-    scale_target = test_data.scaler.scale_[-1]
-    full_actual = test_data.data_y[:, -1] * scale_target + mean_target
-
-    # Calculate prediction start index
-    ###pred_start_index = args.seq_len + args.label_len
-    pred_start_index = args.seq_len 
-
-    print(f"[DEBUG] prediction start index is index is {pred_start_index}")
-
-
-    # Calculate maximum number of predictions
-    max_predictions = total_length - pred_start_index
-    print(f"[DEBUG] max predictions is {max_predictions}")
-
-    # Initialize prediction counter
-    assigned_predictions = 0
+    # Initialize lists to store predictions and true labels
+    all_predictions = []
+    all_true_labels = []
 
     # Inference loop
     with torch.no_grad():
         for i, batch in enumerate(tqdm(test_loader, desc="Running Inference")):
-            if assigned_predictions >= max_predictions:
-                break  # Stop if all predictions have been assigned
-
             # Unpack the batch
             batch_x, batch_y, batch_x_mark, batch_y_mark = batch
             batch_x = batch_x.float().to(device)
-            batch_y = batch_y.float().to(device)
+            batch_y = batch_y.long().to(device)
             batch_x_mark = batch_x_mark.float().to(device)
             batch_y_mark = batch_y_mark.float().to(device)
 
-            # Prepare decoder input (use previous labels)
-            dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float().to(device)
-            dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(device)
-
             # Forward pass
-            if args.output_attention:
-                outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+            if args.use_amp:
+                with torch.cuda.amp.autocast():
+                    if args.output_attention:
+                        outputs = model(batch_x, batch_x_mark)[0]
+                    else:
+                        outputs = model(batch_x, batch_x_mark)
             else:
-                outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-
-            # Adjust output dimensions based on features
-            if args.features in ['M', 'MS']:
-                f_dim = -1  # Select the last feature (target feature)
-            else:
-                f_dim = 0  # For univariate tasks
-
-            # Select relevant features for output
-            outputs = outputs[:, -args.pred_len:, f_dim:]
-            batch_y = batch_y[:, -args.pred_len:, f_dim:]
-
-            # Reshape to 2D for inverse_transform if scaler exists
-            if hasattr(test_data, 'scaler'):
-                # Check if scaler has mean_ and scale_ attributes
-                if hasattr(test_data.scaler, 'mean_') and hasattr(test_data.scaler, 'scale_'):
-                    batch_size, pred_len, features = outputs.shape
-                    # Reshape outputs and batch_y to (batch_size * pred_len, features)
-                    outputs_reshaped = outputs.cpu().reshape(-1, features)
-                    batch_y_reshaped = batch_y.cpu().reshape(-1, features)
-
-                    # Manually inverse transform only the target feature
-                    # Assuming target feature is the last feature
-                    mean_target = test_data.scaler.mean_[-1]
-                    scale_target = test_data.scaler.scale_[-1]
-
-                    # Apply inverse transformation
-                    outputs_inversed = outputs_reshaped * scale_target + mean_target
-                    batch_y_inversed = batch_y_reshaped * scale_target + mean_target
+                if args.output_attention:
+                    outputs = model(batch_x, batch_x_mark)[0]
                 else:
-                    print("Scaler does not have 'mean_' and 'scale_' attributes. Skipping inverse transform.")
-                    outputs_inversed = outputs.cpu()
-                    batch_y_inversed = batch_y.cpu()
-            else:
-                outputs_inversed = outputs.cpu()
-                batch_y_inversed = batch_y.cpu()
+                    outputs = model(batch_x, batch_x_mark)
 
-            # Flatten predictions
-            batch_predictions = outputs_inversed.numpy().flatten()
+            # Reshape outputs and targets to match training
+            B, T, num_classes = outputs.shape
+            outputs = outputs.reshape(B * T, num_classes)  # Shape: (B*T, num_classes)
+            batch_y = batch_y.reshape(B * T)               # Shape: (B*T,)
 
-            # Calculate the number of predictions to assign in this batch
-            remaining_predictions = max_predictions - assigned_predictions
-            if remaining_predictions <= 0:
-                break  # All predictions have been assigned
+            # Get predicted classes
+            _, predicted = torch.max(outputs, dim=1)  # Shape: (B*T,)
 
-            # Determine how many predictions to take from this batch
-            assign_len = min(len(batch_predictions), remaining_predictions)
+            # Collect predictions and true labels
+            all_predictions.extend(predicted.cpu().numpy())
+            all_true_labels.extend(batch_y.cpu().numpy())
 
-            # Calculate start and end indices
-            start_idx = pred_start_index + assigned_predictions
-            end_idx = start_idx + assign_len
+    # Convert to NumPy arrays
+    all_predictions = np.array(all_predictions)
+    all_true_labels = np.array(all_true_labels)
 
-            # Assign predictions
-            full_predicted[start_idx:end_idx] = batch_predictions[:assign_len]
+    # Generate timeline
+    total_length = len(all_true_labels)
+    timeline = np.arange(total_length)
 
-            # Update the counter
-            assigned_predictions += assign_len
+    # Calculate evaluation metrics
+    accuracy = accuracy_score(all_true_labels, all_predictions)
+    precision = precision_score(all_true_labels, all_predictions, average='weighted', zero_division=0)
+    recall = recall_score(all_true_labels, all_predictions, average='weighted', zero_division=0)
+    f1 = f1_score(all_true_labels, all_predictions, average='weighted', zero_division=0)
+    conf_matrix = confusion_matrix(all_true_labels, all_predictions)
 
-            # Optional: Print assignment status
-            if i % 10 == 0:
-                print(f"Assigned {assigned_predictions}/{max_predictions} predictions.")
-
-    # Define save paths
-    os.makedirs('plots', exist_ok=True)
-    os.makedirs('results_csv', exist_ok=True)
-    save_path = os.path.join('plots', f'{os.path.splitext(args.save_plot_path)[0]}_{args.csv_name}.png')
-    csv_filename = os.path.join('results_csv', f'inference_results_{args.csv_name}.csv')
-
-    # Plot the full series forecasting results
-    plot_full_series(timeline, full_actual, full_predicted, args.target, save_path=save_path)
-
-    # Prepare DataFrame for CSV
-    results_df = pd.DataFrame({
-        'Time': timeline,
-        'Actual': full_actual,
-        'Predicted': full_predicted
-    })
+    # Print metrics
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Precision (Weighted): {precision:.4f}")
+    print(f"Recall (Weighted): {recall:.4f}")
+    print(f"F1 Score (Weighted): {f1:.4f}")
+    print("Confusion Matrix:")
+    print(conf_matrix)
 
     # Save results to CSV
-    results_df.to_csv(csv_filename, index=False)
-    print(f"Inference results for {args.target} saved to '{csv_filename}'")
+    results_df = pd.DataFrame({
+        'Time': timeline,
+        'True_Label': all_true_labels,
+        'Predicted_Label': all_predictions
+    })
+    results_df.to_csv(args.save_results_path, index=False)
+    print(f"Inference results saved to '{args.save_results_path}'")
 
-    # Compute evaluation metrics on the predicted points
-    valid_indices = ~np.isnan(full_predicted)
-    mae = np.mean(np.abs(full_actual[valid_indices] - full_predicted[valid_indices]))
-    rmse = np.sqrt(np.mean((full_actual[valid_indices] - full_predicted[valid_indices]) ** 2))
-    mape = np.mean(np.abs((full_actual[valid_indices] - full_predicted[valid_indices]) / (full_actual[valid_indices] + 1e-10))) * 100  # Prevent division by zero
-
-    print(f"Mean Absolute Error (MAE): {mae}")
-    print(f"Root Mean Squared Error (RMSE): {rmse}")
-    print(f"Mean Absolute Percentage Error (MAPE): {mape}%")
+    # Plot the classification results
+    plot_classification_results(timeline, all_true_labels, all_predictions, save_path=args.save_plot_path)
 
     print("All inference tasks completed successfully.")
-
 
 if __name__ == "__main__":
     main()
