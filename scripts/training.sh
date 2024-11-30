@@ -2,9 +2,9 @@
 # This is the end of the update
 # Set model and training parameters
 model_name=TimeLLM
-train_epochs=5
-learning_rate=0.1
-llama_layers=5
+train_epochs=30
+learning_rate=0.00001
+llama_layers=8
 master_port=29500
 num_process=8
 batch_size=3
@@ -27,7 +27,7 @@ accelerate launch --multi_gpu --mixed_precision bf16 --num_processes $num_proces
   --task_name classification \
   --is_training 1 \
   --root_path ./dataset/sinusoidal/ \
-  --data_path synthetic_anomaly_classification_dataset.csv \
+  --data_path synthetic_data.csv \
   --model_id ECL_512_96 \
   --model $model_name \
   --data ECL \
@@ -51,5 +51,5 @@ accelerate launch --multi_gpu --mixed_precision bf16 --num_processes $num_proces
   --train_epochs $train_epochs \
   --percent 100 \
   --model_comment $comment \
-  --content "Sinusoid" \
+  --content "This is a sine wave with anomalies. Anomalies are points that do not follow the trend" \
   --patch_len 128\
