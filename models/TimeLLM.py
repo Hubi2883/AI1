@@ -25,7 +25,98 @@ class FlattenHead_prediction(nn.Module):
         x = self.linear(x)
         x = self.dropout(x)
         return x
-    
+
+class FInterpolation_binary_classification(nn.Module):
+    def __init__(self, n_vars, d_ff, num_classes, T, head_dropout=0.3):
+        super().__init__()
+        self.n_vars = n_vars        # Number of variables (features), N
+        self.d_ff = d_ff            # Feedforward dimension, D_ff
+        self.num_classes = num_classes
+        self.T = T                  # Original sequence length
+        self.head_dropout = head_dropout
+
+        # Hidden layer sizes before interpolation
+        hidden_size_before1 = 256
+        hidden_size_before2 = 128
+
+        # FC layers before interpolation with BatchNorm and Activation
+        self.fc_before_interp1 = nn.Linear(n_vars * d_ff, hidden_size_before1)
+        self.bn_before_interp1 = nn.BatchNorm1d(hidden_size_before1)
+        self.relu_before_interp1 = nn.ReLU(inplace=True)
+        self.dropout_before_interp1 = nn.Dropout(head_dropout)
+
+        self.fc_before_interp2 = nn.Linear(hidden_size_before1, hidden_size_before2)
+        self.bn_before_interp2 = nn.BatchNorm1d(hidden_size_before2)
+        self.relu_before_interp2 = nn.ReLU(inplace=True)
+        self.dropout_before_interp2 = nn.Dropout(head_dropout)
+
+        # Optional: Add a third FC layer for increased complexity
+        self.fc_before_interp3 = nn.Linear(hidden_size_before2, hidden_size_before2)
+        self.bn_before_interp3 = nn.BatchNorm1d(hidden_size_before2)
+        self.relu_before_interp3 = nn.ReLU(inplace=True)
+        self.dropout_before_interp3 = nn.Dropout(head_dropout)
+
+        # Final FC layer before interpolation
+        self.fc_before_interp_final = nn.Linear(hidden_size_before2, hidden_size_before2)
+        self.bn_before_interp_final = nn.BatchNorm1d(hidden_size_before2)
+        self.relu_before_interp_final = nn.ReLU(inplace=True)
+        self.dropout_before_interp_final = nn.Dropout(head_dropout)
+
+        # FC layer after interpolation: simple linear transformation
+        self.fc_after_interp = nn.Linear(hidden_size_before2, num_classes)
+
+    def forward(self, x):
+        # x shape: (B, N, D_ff, L_total)
+        B, N, D_ff, L_total = x.shape
+
+        # Flatten over N and D_ff dimensions
+        x = x.view(B, N * D_ff, L_total)  # Shape: (B, N*D_ff, L_total)
+
+        # FC layers before interpolation
+        x = x.permute(0, 2, 1).contiguous().reshape(B * L_total, N * D_ff)  # Shape: (B*L_total, N*D_ff)
+
+        # First FC layer
+        x = self.fc_before_interp1(x)  # Shape: (B*L_total, hidden_size_before1)
+        x = self.bn_before_interp1(x)
+        x = self.relu_before_interp1(x)
+        x = self.dropout_before_interp1(x)
+
+        # Second FC layer
+        x = self.fc_before_interp2(x)  # Shape: (B*L_total, hidden_size_before2)
+        x = self.bn_before_interp2(x)
+        x = self.relu_before_interp2(x)
+        x = self.dropout_before_interp2(x)
+
+        # Third FC layer (optional for increased complexity)
+        x = self.fc_before_interp3(x)  # Shape: (B*L_total, hidden_size_before2)
+        x = self.bn_before_interp3(x)
+        x = self.relu_before_interp3(x)
+        x = self.dropout_before_interp3(x)
+
+        # Final FC layer before interpolation
+        x = self.fc_before_interp_final(x)  # Shape: (B*L_total, hidden_size_before2)
+        x = self.bn_before_interp_final(x)
+        x = self.relu_before_interp_final(x)
+        x = self.dropout_before_interp_final(x)
+
+        # Reshape back for interpolation
+        x = x.view(B, L_total, -1).permute(0, 2, 1).contiguous()  # Shape: (B, hidden_size_before2, L_total)
+
+        # Interpolate to match T
+        if L_total != self.T:
+            x = F.interpolate(x, size=self.T, mode='linear', align_corners=False)
+            L_total = self.T
+
+        # Simple linear transformation after interpolation
+        x = x.permute(0, 2, 1).contiguous().reshape(B * self.T, -1)  # Shape: (B*T, hidden_size_before2)
+        x = self.fc_after_interp(x)  # Shape: (B*T, num_classes)
+
+        # Reshape back to (B, T, num_classes)
+        x = x.view(B, self.T, self.num_classes)  # Shape: (B, T, num_classes)
+        #x = torch.sigmoid(x)  # Uncomment if using BCEWithLogitsLoss
+
+        return x
+
 
 
 class ExtendedFullyConnectedFlattenHead(nn.Module):
