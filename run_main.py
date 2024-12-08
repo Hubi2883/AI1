@@ -5,7 +5,9 @@ from accelerate import DistributedDataParallelKwargs
 from torch import nn, optim
 from torch.optim import lr_scheduler
 from tqdm import tqdm
+
 from models import Autoformer, DLinear, TimeLLM
+
 from data_provider.data_factory import data_provider
 import time
 import random
@@ -127,8 +129,6 @@ for ii in range(args.itr):
     vali_data, vali_loader = data_provider(args, 'val')
     test_data, test_loader = data_provider(args, 'test')
 
-    print(f"Train loader: {train_loader}, Vali loader: {vali_loader}, Test loader: {test_loader}")
-
     if args.model == 'Autoformer':
         model = Autoformer.Model(args).float()
     elif args.model == 'DLinear':
@@ -178,59 +178,29 @@ for ii in range(args.itr):
 
         model.train()
         epoch_time = time.time()
-        for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in tqdm(enumerate(train_loader)):
+        for i, (batch_x, batch_y_pred, batch_y_class, batch_x_mark, batch_y_mark) in tqdm(enumerate(train_loader)):
             iter_count += 1
             model_optim.zero_grad()
 
             batch_x = batch_x.float().to(accelerator.device)
-            batch_y = batch_y.long().to(accelerator.device)
+            batch_y_pred = batch_y_pred.float().to(accelerator.device)
             batch_x_mark = batch_x_mark.float().to(accelerator.device)
             batch_y_mark = batch_y_mark.float().to(accelerator.device)
 
-            # decoder input (Not use for now)
-            #dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float().to(
-            #    accelerator.device)
-            #dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(
-            #    accelerator.device)
-
             # encoder - decoder
-            if args.use_amp:
-                with torch.cuda.amp.autocast():
-                    if args.output_attention:
-                        outputs = model(batch_x, batch_x_mark)[0]
-                        #outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
-                        #batch_y = batch_y.view(-1)  # (B*T,)
-                    else:
-                        outputs = model(batch_x, batch_x_mark)
-                        #outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
-                        #batch_y = batch_y.view(-1)  # (B*T,)
-
-                    #f_dim = -1 if args.features == 'MS' else 0
-                    #outputs = outputs#[:, -args.pred_len:, f_dim:]
-                    batch_y = batch_y.to(accelerator.device)#[:, -args.pred_len:, f_dim:].to(accelerator.device)
-                    loss = criterion(outputs, batch_y)
-                    train_loss.append(loss.item())
+            if args.output_attention:
+                outputs = model(batch_x, batch_y_pred)[0]
             else:
-                if args.output_attention:
-                    outputs = model(batch_x, batch_x_mark)[0]
-                    #outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
-                    #batch_y = batch_y.view(-1)  # (B*T,)
-                else:
-                    outputs = model(batch_x, batch_x_mark)
-                    B, T, num_classes = outputs.shape
-                    #print("Outputs Shape:", outputs.shape)
-                    #print("Batch_Y Shape:", batch_y.shape)
-                    #outputs = outputs.view(-1, args.num_classes)  # (B*T, num_classes)
-                    #batch_y = batch_y.view(-1)  # (B*T,)
+                outputs = model(batch_x, batch_y_pred)
 
-                #f_dim = -1 if args.features == 'MS' else 0
-                #outputs = outputs#[:, -args.pred_len:, f_dim:]
-
-                outputs = outputs.reshape(B * T, num_classes) #Shape: (B*T, num_classes)
-                batch_y = batch_y.reshape(B * T)
-
-                loss = criterion(outputs, batch_y)
-                train_loss.append(loss.item())
+            #f_dim = -1 if args.features == 'MS' else 0
+            #outputs = outputs[:, -args.pred_len:, f_dim:] #(B, pred_len, 1)
+            #batch_y_pred = batch_y_pred[:, -args.pred_len:, f_dim:] #(B, pred_len, 1)
+            A, B, C = outputs.shape #(B, pred_len, num_classes)
+            outputs = outputs.reshape(A * B, C)
+            batch_y_class = batch_y_class.reshape(A * B)
+            loss = criterion(outputs, batch_y_class)
+            train_loss.append(loss.item())
 
             if (i + 1) % 100 == 0:
                 accelerator.print(
