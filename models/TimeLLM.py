@@ -12,6 +12,54 @@ import os
 
 transformers.logging.set_verbosity_error()
 
+
+class FlattenHead_binary_classification(nn.Module):
+    def __init__(self, n_vars, d_ff, patch_nums, T, num_classes, head_dropout=0):
+        """
+        n_vars: number of variables/features (N)
+        d_ff: dimension of feed-forward layer output (D_ff)
+        patch_nums: number of patches (essentially the 'L_total' dimension)
+        T: the desired sequence length dimension in the final output
+        num_classes: the number of classes for classification
+        head_dropout: dropout probability for regularization
+        """
+        super().__init__()
+        self.n_vars = n_vars
+        self.d_ff = d_ff
+        self.patch_nums = patch_nums
+        self.T = T
+        self.num_classes = num_classes
+
+        # Compute the flattened dimension: N * D_ff * patch_nums
+        self.nf = n_vars * d_ff * patch_nums
+
+        # We'll flatten all dimensions except B, turning (N, D_ff, patch_nums) into nf
+        self.flatten = nn.Flatten(start_dim=1)  
+        # After flatten: (B, N*D_ff*patch_nums)
+
+        # A single linear layer to go from nf to T * num_classes
+        self.linear = nn.Linear(self.nf, T * num_classes)
+        self.dropout = nn.Dropout(head_dropout)
+
+    def forward(self, x):
+        # x shape: (B, N, D_ff, patch_nums)
+        B, N, D_ff, patch_nums = x.shape
+        
+        # Flatten to (B, N*D_ff*patch_nums)
+        x = self.flatten(x)
+        
+        # Linear transform to get (B, T * num_classes)
+        x = self.linear(x)
+        
+        # Apply dropout
+        x = self.dropout(x)
+        
+        # Reshape to (B, T, num_classes)
+        x = x.view(B, self.T, self.num_classes)
+
+        return x
+
+
 class FlattenHead_prediction(nn.Module):
     def __init__(self, n_vars, nf, target_window, head_dropout=0):
         super().__init__()
