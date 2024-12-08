@@ -255,7 +255,7 @@ def del_files(dir_path):
     shutil.rmtree(dir_path)
 
 
-def vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric):
+def vali(args, accelerator, model, vali_data, vali_loader, criterion):
     """
     Validation function to evaluate the model's performance on the validation dataset.
 
@@ -266,13 +266,15 @@ def vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric
         vali_data: The validation dataset.
         vali_loader: DataLoader for the validation dataset.
         criterion: Loss function.
-        mae_metric: Metric for Mean Absolute Error.
 
     Returns:
-        Tuple containing average validation loss and average validation MAE loss.
+        Tuple containing average validation loss, accuracy, precision, recall, and F1 score.
     """
     total_loss = []
-    total_mae_loss = []
+    total_accuracy = []
+    total_precision = []
+    total_recall = []
+    total_f1_score = []
     model.eval()
     logging.info("Starting validation...")
 
@@ -281,81 +283,91 @@ def vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric
             # Ensure that vali_loader has data
             if len(vali_loader) == 0:
                 logging.warning("Validation loader is empty.")
-                return 0.0, 0.0
+                return 0.0, 0.0, 0.0, 0.0, 0.0
 
             # Iterate over the validation data
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(tqdm(vali_loader, desc="Validation Batches")):
+            for i, (batch_x, batch_y_pred, batch_y_class, batch_x_mark, batch_y_mark) in enumerate(tqdm(vali_loader, desc="Validation Batches")):
                 try:
                     # Move data to the appropriate device
                     batch_x = batch_x.float().to(accelerator.device)
-                    batch_y = batch_y.float().to(accelerator.device)
+                    batch_y_pred = batch_y_pred.float().to(accelerator.device)
                     batch_x_mark = batch_x_mark.float().to(accelerator.device)
                     batch_y_mark = batch_y_mark.float().to(accelerator.device)
 
-                    # Prepare decoder input
-                    dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float()
-                    dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(accelerator.device)
-
-                    # Forward pass with or without AMP
+                    # Forward pass
                     if args.use_amp:
                         with torch.cuda.amp.autocast():
                             if args.output_attention:
-                                outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                                outputs = model(batch_x, batch_x_mark)[0]
                             else:
-                                outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                                outputs = model(batch_x, batch_x_mark)
                     else:
                         if args.output_attention:
-                            outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                            outputs = model(batch_x, batch_x_mark)[0]
                         else:
-                            outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                            outputs = model(batch_x, batch_x_mark)
 
-                    # Gather outputs and targets from all processes
-                    outputs, batch_y = accelerator.gather_for_metrics((outputs, batch_y))
+                    # Reshape outputs and targets to match training
+                    A, B, C = outputs.shape #(B, pred_len, num_classes)
+                    outputs = outputs.reshape(A * B, C)
+                    batch_y_class = batch_y_class.reshape(A * B)
 
-                    # Select feature dimension
-                    f_dim = -1 if args.features == 'MS' else 0
-                    outputs = outputs[:, -args.pred_len:, f_dim:]
-                    batch_y = batch_y[:, -args.pred_len:, f_dim:].to(accelerator.device)
-
-                    # Detach tensors to prevent gradient computation
-                    pred = outputs.detach()
-                    true = batch_y.detach()
-
-                    # Compute losses
-                    loss = criterion(pred, true)
-                    mae_loss = mae_metric(pred, true)
-
-                    # Append losses to the lists
+                    # Compute loss
+                    loss = criterion(outputs, batch_y_class)
                     total_loss.append(loss.item())
-                    total_mae_loss.append(mae_loss.item())
+
+                    # Get predicted classes
+                    _, predicted = torch.max(outputs, dim=1)  # Shape: (B*T,)
+
+                    # Compute metrics
+                    tp = torch.sum((predicted == 1) & (batch_y_class == 1)).item()
+                    fp = torch.sum((predicted == 1) & (batch_y_class == 0)).item()
+                    fn = torch.sum((predicted == 0) & (batch_y_class == 1)).item()
+                    tn = torch.sum((predicted == 0) & (batch_y_class == 0)).item()
+
+                    total = tp + tn + fp + fn
+                    accuracy = (tp + tn) / total if total > 0 else 0.0
+                    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+
+                    # Append metrics
+                    total_accuracy.append(accuracy)
+                    total_precision.append(precision)
+                    total_recall.append(recall)
+                    total_f1_score.append(f1_score)
 
                     # Debugging: Log loss values for the current batch
-                    logging.debug(f"Batch {i+1}/{len(vali_loader)} - Loss: {loss.item():.6f}, MAE Loss: {mae_loss.item():.6f}")
+                    logging.debug(f"Batch {i+1}/{len(vali_loader)} - Loss: {loss.item():.6f}")
 
                 except Exception as batch_e:
                     logging.error(f"Error processing batch {i+1}: {batch_e}")
                     # Depending on your preference, you can choose to continue or halt validation
                     # Here, we'll halt validation if a batch fails
-                    return None, None
+                    return None, None, None, None, None
 
-        # Calculate average losses
+        # Calculate average losses and metrics
         if total_loss:
             avg_loss = np.average(total_loss)
-            avg_mae_loss = np.average(total_mae_loss)
-            logging.info(f"Validation completed. Average Loss: {avg_loss:.6f}, Average MAE Loss: {avg_mae_loss:.6f}")
+            avg_accuracy = np.average(total_accuracy)
+            avg_precision = np.average(total_precision)
+            avg_recall = np.average(total_recall)
+            avg_f1_score = np.average(total_f1_score)
+            logging.info(f"Validation completed. Average Loss: {avg_loss:.6f}, Average Accuracy: {avg_accuracy:.4f}, "
+                         f"Average Precision: {avg_precision:.4f}, Average Recall: {avg_recall:.4f}, "
+                         f"Average F1 Score: {avg_f1_score:.4f}")
         else:
             logging.warning("No losses recorded during validation.")
-            avg_loss, avg_mae_loss = 0.0, 0.0
+            avg_loss, avg_accuracy, avg_precision, avg_recall, avg_f1_score = 0.0, 0.0, 0.0, 0.0, 0.0
 
     except Exception as e:
         logging.error(f"An error occurred during validation: {e}")
-        return None, None
+        return None, None, None, None, None
     finally:
         # Ensure the model is set back to training mode
         model.train()
 
-    return avg_loss, avg_mae_loss
-
+    return avg_loss, avg_accuracy, avg_precision, avg_recall, avg_f1_score
 
 def test(args, accelerator, model, train_loader, vali_loader, criterion):
     """
