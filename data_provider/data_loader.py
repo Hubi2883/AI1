@@ -97,30 +97,38 @@ class Dataset_Custom(Dataset):
 
         # Save processed data
         self.data_x = data_x[border1:border2]
-        self.data_y = data_y[border1:border2]  # Target labels
+        self.data_y_pred = data_x[border1:border2]
+        self.data_y_class = data_y[border1:border2]  # Target labels
         self.data_stamp = data_stamp
 
     def __getitem__(self, index):
         """
         Get a single sample from the dataset.
         """
+        feat_id = index // self.tot_len
         s_begin = index % self.tot_len
+
         s_end = s_begin + self.seq_len
+        r_begin = s_end
+        r_end = r_begin + self.pred_len
+
+        seq_x = self.data_x[s_begin:s_end, feat_id:feat_id + 1]
+        seq_y_pred = self.data_y_pred[r_begin:r_end, feat_id:feat_id + 1]
 
         # Extract input sequence (multiple features)
         seq_x = self.data_x[s_begin:s_end, :]  # All features for the sequence
 
         # Extract target sequence (corresponding to seq_x length)
-        seq_y = self.data_y[s_begin:s_end, :]  # Target feature for classification
+        seq_y_class = self.data_y_class[r_begin:r_end, feat_id:feat_id + 1]  # Target feature for classification
 
         seq_x_mark = self.data_stamp[s_begin:s_end]
-        seq_y_mark = self.data_stamp[s_begin:s_end]
+        seq_y_mark = self.data_stamp[r_begin:r_end]
 
-        return seq_x, seq_y, seq_x_mark, seq_y_mark
+        return seq_x, seq_y_pred, seq_y_class, seq_x_mark, seq_y_mark
 
     def __len__(self):
         return (len(self.data_x) - self.seq_len - self.pred_len + 1) * self.enc_in
 
     def inverse_transform(self, data):
         return self.scaler.inverse_transform(data)
-
+        
