@@ -1,4 +1,4 @@
-![Diagram](Screenshot%202025-11-05%20at%2021.50.58.png)
+
 
 Github Repository for the implementation of Time-LLM by AIAS group 1
 
